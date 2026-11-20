@@ -52,3 +52,23 @@ foreach(TEST_NAME IN ITEMS clean_shutdown validation_live validation_leak vector
                            stats batch_equivalence validation_modes)
   add_test(NAME ${TEST_NAME} COMMAND gpu_profiler --test ${TEST_NAME})
 endforeach()
+
+# ---------------------------------------------------------------------------
+# VK_LAYER_stage_profiler (Phase 7)
+# ---------------------------------------------------------------------------
+
+set(LAYER_OUTPUT_DIR ${CMAKE_BINARY_DIR}/layer)
+add_library(VkLayer_stage_profiler MODULE layer/stage_layer.cpp)
+# A layer uses only the Vulkan headers; it must not link the loader.
+target_include_directories(VkLayer_stage_profiler PRIVATE ${Vulkan_INCLUDE_DIRS})
+target_compile_options(VkLayer_stage_profiler PRIVATE -Wall -Wextra -Wpedantic)
+set_target_properties(VkLayer_stage_profiler PROPERTIES
+  LIBRARY_OUTPUT_DIRECTORY ${LAYER_OUTPUT_DIR}
+  CXX_VISIBILITY_PRESET hidden)
+
+# The manifest tells the loader the layer's name and where its library is.
+set(LAYER_FILE_NAME "$<TARGET_FILE_NAME:VkLayer_stage_profiler>")
+configure_file(layer/VkLayer_stage_profiler.json.in
+               ${CMAKE_BINARY_DIR}/VkLayer_stage_profiler.json.gen @ONLY)
+file(GENERATE OUTPUT ${LAYER_OUTPUT_DIR}/VkLayer_stage_profiler.json
+     INPUT ${CMAKE_BINARY_DIR}/VkLayer_stage_profiler.json.gen)

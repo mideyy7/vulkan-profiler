@@ -1,0 +1,11 @@
+{
+    "file_format_version": "1.2.0",
+    "layer": {
+        "name": "VK_LAYER_stage_profiler",
+        "type": "GLOBAL",
+        "library_path": "./@LAYER_FILE_NAME@",
+        "api_version": "1.2.0",
+        "implementation_version": "1",
+        "description": "Counts dispatches, barriers and copies and times submits and waits"
+    }
+}
