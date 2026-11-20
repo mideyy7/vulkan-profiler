@@ -16,6 +16,7 @@ constexpr const char* kValidationFeaturesExtension = "VK_EXT_validation_features
 constexpr const char* kPortabilitySubsetExtension = "VK_KHR_portability_subset";
 
 std::atomic<uint32_t> gValidationMessages{0};
+std::atomic<uint32_t> gSyncHazardMessages{0};
 
 std::vector<VkExtensionProperties> instanceExtensions(const char* layerName) {
     uint32_t count = 0;
@@ -65,6 +66,11 @@ VKAPI_ATTR VkBool32 VKAPI_CALL onDebugMessage(VkDebugUtilsMessageSeverityFlagBit
                                               const VkDebugUtilsMessengerCallbackDataEXT* data,
                                               void*) {
     ++gValidationMessages;
+    // The hazard type is in the message ID name, e.g. "SYNC-HAZARD-READ-AFTER-WRITE".
+    if (data->pMessageIdName != nullptr &&
+        std::strstr(data->pMessageIdName, "SYNC-HAZARD") != nullptr) {
+        ++gSyncHazardMessages;
+    }
     const char* label =
         severity >= VK_DEBUG_UTILS_MESSAGE_SEVERITY_ERROR_BIT_EXT ? "error" : "warning";
     std::fprintf(stderr, "[vulkan %s] %s\n", label, data->pMessage);
@@ -138,6 +144,10 @@ void check(VkResult result, const char* action) {
 
 uint32_t validationMessageCount() {
     return gValidationMessages.load();
+}
+
+uint32_t syncHazardMessageCount() {
+    return gSyncHazardMessages.load();
 }
 
 VulkanContext::VulkanContext() {

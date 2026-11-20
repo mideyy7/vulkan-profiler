@@ -12,6 +12,9 @@ void check(VkResult result, const char* action);
 // destroyed, which is when leaked objects are reported.
 uint32_t validationMessageCount();
 
+// Number of messages whose ID starts with "SYNC-HAZARD", for the validation canary test.
+uint32_t syncHazardMessageCount();
+
 class VulkanContext {
 public:
     VulkanContext();
