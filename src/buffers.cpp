@@ -4,7 +4,6 @@
 
 #include <cstring>
 #include <stdexcept>
-#include <string>
 
 uint32_t findMemoryType(VkPhysicalDevice physicalDevice, uint32_t typeFilter,
                         VkMemoryPropertyFlags properties) {
@@ -80,9 +79,7 @@ void uploadToDeviceLocal(const VulkanContext& ctx, Buffer& dst, const void* data
     beginInfo.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
     check(vkBeginCommandBuffer(cmd, &beginInfo), "vkBeginCommandBuffer");
 
-    VkBufferCopy region{};
-    region.size = dataSize;
-    vkCmdCopyBuffer(cmd, staging.buffer, dst.buffer, 1, &region);
+    cmdCopyBuffer(cmd, staging.buffer, dst.buffer, dataSize);
 
     check(vkEndCommandBuffer(cmd), "vkEndCommandBuffer");
 
@@ -97,7 +94,7 @@ void uploadToDeviceLocal(const VulkanContext& ctx, Buffer& dst, const void* data
     VkFence fence = VK_NULL_HANDLE;
     check(vkCreateFence(ctx.device(), &fenceInfo, nullptr, &fence), "vkCreateFence");
     check(vkQueueSubmit(ctx.queue(), 1, &submitInfo, fence), "vkQueueSubmit");
-    check(vkWaitForFences(ctx.device(), 1, &fence, VK_TRUE, UINT64_MAX), "vkWaitForFences");
+    waitForFence(ctx.device(), fence);
 
     vkDestroyFence(ctx.device(), fence, nullptr);
     vkDestroyCommandPool(ctx.device(), pool, nullptr);

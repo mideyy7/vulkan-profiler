@@ -150,6 +150,28 @@ uint32_t syncHazardMessageCount() {
     return gSyncHazardMessages.load();
 }
 
+void waitForFence(VkDevice device, VkFence fence) {
+    check(vkWaitForFences(device, 1, &fence, VK_TRUE, UINT64_MAX), "vkWaitForFences");
+}
+
+void cmdDispatch(VkCommandBuffer cmd, uint32_t groupCountX) {
+    vkCmdDispatch(cmd, groupCountX, 1, 1);
+}
+
+void cmdPipelineBarrier(VkCommandBuffer cmd, VkPipelineStageFlags srcStages,
+                        VkPipelineStageFlags dstStages, uint32_t memoryBarrierCount,
+                        const VkMemoryBarrier* memoryBarriers, uint32_t bufferBarrierCount,
+                        const VkBufferMemoryBarrier* bufferBarriers) {
+    vkCmdPipelineBarrier(cmd, srcStages, dstStages, 0, memoryBarrierCount, memoryBarriers,
+                         bufferBarrierCount, bufferBarriers, 0, nullptr);
+}
+
+void cmdCopyBuffer(VkCommandBuffer cmd, VkBuffer src, VkBuffer dst, VkDeviceSize size) {
+    VkBufferCopy region{};
+    region.size = size;
+    vkCmdCopyBuffer(cmd, src, dst, 1, &region);
+}
+
 VulkanContext::VulkanContext() {
     try {
         createInstance();
