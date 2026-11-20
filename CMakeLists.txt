@@ -72,3 +72,10 @@ configure_file(layer/VkLayer_stage_profiler.json.in
                ${CMAKE_BINARY_DIR}/VkLayer_stage_profiler.json.gen @ONLY)
 file(GENERATE OUTPUT ${LAYER_OUTPUT_DIR}/VkLayer_stage_profiler.json
      INPUT ${CMAKE_BINARY_DIR}/VkLayer_stage_profiler.json.gen)
+
+find_package(Python3 COMPONENTS Interpreter)
+if(Python3_FOUND)
+  add_test(NAME layer_check
+           COMMAND ${Python3_EXECUTABLE} ${CMAKE_SOURCE_DIR}/scripts/check_layer.py
+                   $<TARGET_FILE:gpu_profiler> ${LAYER_OUTPUT_DIR})
+endif()
