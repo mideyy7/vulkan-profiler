@@ -330,7 +330,7 @@ bool testVectorAdd() {
 constexpr uint32_t kTestSeeds = 5;
 
 // GPU forces against the double-precision CPU reference (C3, C4).
-bool testForce() {
+bool testForce(ForceKernel kernel) {
     const uint32_t sizes[] = {1, 63, 64, 65, 1000};
     constexpr double kLimit = 1e-5;
     VulkanContext ctx;
@@ -340,7 +340,7 @@ bool testForce() {
         double worst = 0.0;
         for (uint32_t seed = 1; seed <= kTestSeeds; ++seed) {
             const std::vector<Particle> particles = generateParticles(n, seed);
-            Simulation sim(ctx, particles);
+            Simulation sim(ctx, particles, kernel);
             const std::vector<std::array<float, 4>> gpu = sim.computeAndReadForces();
             const std::vector<Vec3d> cpu = cpuForces(particles);
 
@@ -524,6 +524,7 @@ struct Options {
     uint32_t warmup = 20;
     uint32_t seed = 1;
     uint32_t maxParticles = 32768;
+    ForceKernel kernel = ForceKernel::Naive;
     std::string csv;
     bool validation = true;
 };
@@ -535,7 +536,7 @@ uint32_t ceilDiv(uint32_t a, uint32_t b) {
 // Warm-up then measured batches (C8). Returns per-stage rows.
 std::vector<StageRow> measure(VulkanContext& ctx, const Options& o, uint32_t particles,
                               RunInfo& info) {
-    Simulation sim(ctx, generateParticles(particles, o.seed));
+    Simulation sim(ctx, generateParticles(particles, o.seed), o.kernel);
     const uint32_t warmupBatches = ceilDiv(o.warmup, o.batch);
     const uint32_t measuredBatches = ceilDiv(o.steps, o.batch);
     for (uint32_t b = 0; b < warmupBatches; ++b) {
@@ -550,7 +551,7 @@ std::vector<StageRow> measure(VulkanContext& ctx, const Options& o, uint32_t par
     info.driver = ctx.driverDescription();
     info.particles = particles;
     info.batch = o.batch;
-    info.kernel = "naive";
+    info.kernel = kernelName(o.kernel);
     info.warmupSteps = warmupBatches * o.batch;
     info.measuredSteps = measuredBatches * o.batch;
     info.validation = ctx.validationEnabled();
@@ -611,7 +612,7 @@ int runSweep(const Options& o) {
                            "submit_mean_ns,wait_mean_ns\n";
                     wroteHeader = true;
                 }
-                csv << n << ',' << o.batch << ',' << "naive" << ','
+                csv << n << ',' << o.batch << ',' << kernelName(o.kernel) << ','
                     << info.measuredSteps << ',' << frame.mean << ',' << frame.p99 << ','
                     << gpu.mean << ',' << overhead.mean << ','
                     << findRow(rows, "force").stats.mean << ','
@@ -661,6 +662,15 @@ Options parseOptions(int argc, char** argv, int first) {
             o.maxParticles = parseCount(flag, value);
         } else if (flag == "--csv") {
             o.csv = value;
+        } else if (flag == "--kernel") {
+            const std::string kernel = value;
+            if (kernel == "naive") {
+                o.kernel = ForceKernel::Naive;
+            } else if (kernel == "tiled") {
+                o.kernel = ForceKernel::Tiled;
+            } else {
+                throw std::runtime_error("--kernel must be naive or tiled");
+            }
         } else {
             throw std::runtime_error("unknown option " + flag);
         }
@@ -688,7 +698,9 @@ int runTest(const std::string& name) {
     } else if (name == "vector_add") {
         passed = testVectorAdd();
     } else if (name == "force_naive") {
-        passed = testForce();
+        passed = testForce(ForceKernel::Naive);
+    } else if (name == "force_tiled") {
+        passed = testForce(ForceKernel::Tiled);
     } else if (name == "momentum") {
         passed = testMomentum();
     } else if (name == "validation_canary") {
@@ -717,7 +729,7 @@ int printUsage() {
                  "       gpu_profiler --test <name>\n"
                  "       gpu_profiler --report [options]\n"
                  "       gpu_profiler --sweep [options]\n"
-                 "Options: --n N  --batch K  --steps S  --warmup W\n"
+                 "Options: --n N  --batch K  --kernel naive|tiled  --steps S  --warmup W\n"
                  "         --seed S  --max-n N  --csv PATH  --no-validation\n");
     return 2;
 }

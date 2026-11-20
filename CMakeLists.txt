@@ -48,7 +48,7 @@ endif()
 enable_testing()
 add_test(NAME info COMMAND gpu_profiler --info)
 foreach(TEST_NAME IN ITEMS clean_shutdown validation_live validation_leak vector_add
-                           force_naive momentum validation_canary timestamps stats
-                           batch_equivalence)
+                           force_naive force_tiled momentum validation_canary timestamps
+                           stats batch_equivalence)
   add_test(NAME ${TEST_NAME} COMMAND gpu_profiler --test ${TEST_NAME})
 endforeach()

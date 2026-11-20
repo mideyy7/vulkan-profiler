@@ -64,6 +64,9 @@ std::vector<Vec3d> cpuForces(const std::vector<Particle>& particles);
 // Simulation
 // ---------------------------------------------------------------------------
 
+enum class ForceKernel { Naive, Tiled };
+const char* kernelName(ForceKernel kernel);
+
 // Timings from one submission of `steps` simulation steps.
 //
 // Timestamp layout (C10), all written at BOTTOM_OF_PIPE:
@@ -81,7 +84,8 @@ struct BatchSample {
 
 class Simulation {
 public:
-    Simulation(VulkanContext& ctx, const std::vector<Particle>& particles);
+    Simulation(VulkanContext& ctx, const std::vector<Particle>& particles,
+               ForceKernel kernel = ForceKernel::Naive);
     ~Simulation();
 
     Simulation(const Simulation&) = delete;
@@ -104,7 +108,7 @@ public:
     uint32_t particleCount() const { return particleCount_; }
 
 private:
-    void create(const std::vector<Particle>& particles);
+    void create(const std::vector<Particle>& particles, ForceKernel kernel);
     void destroy();
     void beginCommands(VkCommandBufferUsageFlags flags);
     void recordForceDispatch();

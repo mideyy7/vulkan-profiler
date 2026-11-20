@@ -115,16 +115,21 @@ std::vector<Vec3d> cpuForces(const std::vector<Particle>& particles) {
     return acc;
 }
 
+const char* kernelName(ForceKernel kernel) {
+    return kernel == ForceKernel::Tiled ? "tiled" : "naive";
+}
+
 // ---------------------------------------------------------------------------
 // Simulation — construction and destruction
 // ---------------------------------------------------------------------------
 
-Simulation::Simulation(VulkanContext& ctx, const std::vector<Particle>& particles)
+Simulation::Simulation(VulkanContext& ctx, const std::vector<Particle>& particles,
+                       ForceKernel kernel)
     : ctx_(ctx),
       particleCount_(static_cast<uint32_t>(particles.size())),
       groups_((particleCount_ + kWorkgroupSize - 1) / kWorkgroupSize) {
     try {
-        create(particles);
+        create(particles, kernel);
     } catch (...) {
         // A destructor does not run when its constructor throws.
         destroy();
@@ -136,7 +141,7 @@ Simulation::~Simulation() {
     destroy();
 }
 
-void Simulation::create(const std::vector<Particle>& particles) {
+void Simulation::create(const std::vector<Particle>& particles, ForceKernel kernel) {
     const VkDeviceSize particleSize = particleCount_ * sizeof(Particle);
     const VkDeviceSize accelSize = particleCount_ * 4 * sizeof(float);
 
@@ -162,8 +167,9 @@ void Simulation::create(const std::vector<Particle>& particles) {
     uploadToDeviceLocal(ctx_, particleBuf_, particles.data(), particleSize);
 
     // --- Shader modules ---
-    forceModule_ =
-        createShaderModule(ctx_.device(), loadShader(shaderPath("force_calc.comp.spv")));
+    const char* forceFile =
+        kernel == ForceKernel::Tiled ? "force_calc_tiled.comp.spv" : "force_calc.comp.spv";
+    forceModule_ = createShaderModule(ctx_.device(), loadShader(shaderPath(forceFile)));
     integrateModule_ =
         createShaderModule(ctx_.device(), loadShader(shaderPath("integrate.comp.spv")));
 
