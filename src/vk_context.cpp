@@ -74,6 +74,13 @@ VKAPI_ATTR VkBool32 VKAPI_CALL onDebugMessage(VkDebugUtilsMessageSeverityFlagBit
                                               VkDebugUtilsMessageTypeFlagsEXT,
                                               const VkDebugUtilsMessengerCallbackDataEXT* data,
                                               void*) {
+    // The loader also reports through this messenger, for example that an
+    // environment variable enabled a layer. Those are notices about setup, not
+    // API misuse, so they are printed but not counted.
+    if (data->pMessageIdName != nullptr && std::strcmp(data->pMessageIdName, "Loader Message") == 0) {
+        std::fprintf(stderr, "[vulkan loader] %s\n", data->pMessage);
+        return VK_FALSE;
+    }
     ++gValidationMessages;
     // The hazard type is in the message ID name, e.g. "SYNC-HAZARD-READ-AFTER-WRITE".
     if (data->pMessageIdName != nullptr &&
