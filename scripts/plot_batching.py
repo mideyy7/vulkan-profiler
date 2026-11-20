@@ -9,11 +9,12 @@ _, batched = read_sweep(out, "sweep_naive_batch32")
 n = [int(r["n"]) for r in unbatched]
 
 fig, ax = new_axes("Batching removes the per-step overhead",
-                   f"Naive kernel, mean frame time per step, median of 3 runs. {gpu_label(meta)}")
-plot_series(ax, n, [float(r["frame_mean_ns"]) / 1e3 for r in unbatched], 0, "batch = 1",
-            label_dy=-8)
-plot_series(ax, n, [float(r["frame_mean_ns"]) / 1e3 for r in batched], 1, "batch = 32",
-            label_dy=8)
+                   f"Naive kernel, mean frame time per step, median of 3 runs.\n{gpu_label(meta)}")
+y1 = [float(r["frame_mean_ns"]) / 1e3 for r in unbatched]
+y32 = [float(r["frame_mean_ns"]) / 1e3 for r in batched]
+# Whichever line ends higher gets its label nudged up, the other down.
+plot_series(ax, n, y1, 0, "batch = 1", label_dy=8 if y1[-1] >= y32[-1] else -8)
+plot_series(ax, n, y32, 1, "batch = 32", label_dy=8 if y32[-1] > y1[-1] else -8)
 ax.set_xscale("log", base=2)
 ax.set_yscale("log")
 ax.set_xlabel("particles (N)")
@@ -31,7 +32,7 @@ for k in sizes:
     low.append(means[2] - means[0])
     high.append(means[-1] - means[2])
 fig, ax = new_axes("Frame time per step against batch size",
-                   f"N = 2048, naive kernel, median of 5 runs, bars span fastest to slowest. "
+                   f"N = 2048, naive kernel, median of 5 runs, bars span fastest to slowest.\n"
                    f"{gpu_label(meta)}")
 ax.errorbar(sizes, median, yerr=[low, high], color=SERIES[0], linewidth=2, marker="o",
             markersize=6, capsize=4, elinewidth=1.2)
