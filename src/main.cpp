@@ -513,6 +513,22 @@ bool testBatchEquivalence() {
     return passed;
 }
 
+// Every measurement mode must run without validation messages.
+bool testValidationModes() {
+    VulkanContext ctx;
+    for (ForceKernel kernel : {ForceKernel::Naive, ForceKernel::Tiled}) {
+        for (uint32_t K : {1u, 32u}) {
+            Simulation sim(ctx, generateParticles(300, 1), kernel);
+            sim.computeAndReadForces();
+            for (int run = 0; run < 3; ++run) {
+                sim.runBatch(K);
+            }
+            std::printf("  kernel=%s batch=%u ran\n", kernelName(kernel), K);
+        }
+    }
+    return true;  // runTest fails the test if any validation message appeared.
+}
+
 // ---------------------------------------------------------------------------
 // --report and --sweep
 // ---------------------------------------------------------------------------
@@ -711,6 +727,8 @@ int runTest(const std::string& name) {
         passed = testStats();
     } else if (name == "batch_equivalence") {
         passed = testBatchEquivalence();
+    } else if (name == "validation_modes") {
+        passed = testValidationModes();
     } else {
         std::fprintf(stderr, "Unknown test: %s\n", name.c_str());
         return 2;
