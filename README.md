@@ -74,14 +74,17 @@ The report is printed to stderr when the app destroys its device. See [docs/laye
 
 ## Results
 
-> **Linux GPU results: not yet captured.** The table below is from an Apple M1 through MoltenVK, which translates Vulkan to Metal. It is a secondary result only.
+**Primary: NVIDIA GeForce RTX 4090, driver 580.178.04, Ubuntu 24.04** ([docs/linux/headline.md](docs/linux/headline.md)). All 14 tests passed on this machine.
 
-Apple M1, MoltenVK 1.4.2 (from [docs/mac/headline.md](docs/mac/headline.md)):
+| Measurement | Before | After | Speed-up |
+| --- | --- | --- | --- |
+| Batching, N = 2,048, batch 1 → 32 (median of 5 runs) | 142.4 µs/step | 100.1 µs/step | **1.42×** |
+| Tiling, N = 16,384, naive → tiled, batch 32 (median of 3 runs) | 725.8 µs/step | 322.9 µs/step | **2.25×** |
+| Fixed overhead per step at N = 2,048 (frame − GPU span) | 40.1 µs | 1.6 µs | |
 
-| Measurement | Result |
-| --- | --- |
-| Batching, N = 2,048, K = 32 against K = 1 | 2.04× (753.7 → 369.8 µs per step, median of 5 runs) |
-| Tiling, N = 16,384, frame time, batch 32 | 1.17× (12,919.5 → 11,024.4 µs per step, median of 3 runs) |
+Reproduce on a Linux NVIDIA machine with `bash scripts/cloud_gpu_run.sh` (see [linux.md](linux.md)).
+
+**Secondary: Apple M1 through MoltenVK** ([docs/mac/headline.md](docs/mac/headline.md)): batching 2.04× at N = 2,048, tiling 1.17× at N = 16,384.
 
 ## Documentation
 
