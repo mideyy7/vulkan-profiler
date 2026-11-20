@@ -80,6 +80,9 @@ public:
     // wait, then copy the particles back. steps = 1 is the unbatched case.
     void runBatch(uint32_t steps);
 
+    // One step with the force->integrate barrier deliberately left out (C2 canary).
+    void stepMissingBarrier();
+
     // Particle state copied back by the most recent runBatch.
     std::vector<Particle> readParticles() const;
 

@@ -416,6 +416,19 @@ bool testMomentum() {
     return passed;
 }
 
+// A deliberately missing barrier must be reported (C2).
+bool testValidationCanary() {
+    VulkanContext ctx;
+    Simulation sim(ctx, generateParticles(256, 1));
+    std::printf("The SYNC-HAZARD error printed below is expected.\n");
+    std::fflush(stdout);
+    const uint32_t before = syncHazardMessageCount();
+    sim.stepMissingBarrier();
+    const uint32_t hazards = syncHazardMessageCount() - before;
+    std::printf("SYNC-HAZARD messages: %u (expected at least 1)\n", hazards);
+    return hazards > 0;
+}
+
 // ---------------------------------------------------------------------------
 // Test dispatch
 // ---------------------------------------------------------------------------
@@ -424,7 +437,7 @@ int runTest(const std::string& name) {
     // These tests deliberately cause validation messages, so they are not
     // also required to finish with zero messages.
     const bool expectsMessages =
-        name == "validation_live" || name == "validation_leak";
+        name == "validation_live" || name == "validation_leak" || name == "validation_canary";
 
     bool passed = false;
     if (name == "clean_shutdown") {
@@ -439,6 +452,8 @@ int runTest(const std::string& name) {
         passed = testForce();
     } else if (name == "momentum") {
         passed = testMomentum();
+    } else if (name == "validation_canary") {
+        passed = testValidationCanary();
     } else {
         std::fprintf(stderr, "Unknown test: %s\n", name.c_str());
         return 2;

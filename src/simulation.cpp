@@ -487,6 +487,18 @@ void Simulation::runBatch(uint32_t steps) {
     submitAndWait();
 }
 
+void Simulation::stepMissingBarrier() {
+    beginCommands(VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT);
+    recordForceDispatch();
+    // recordForceBarrier() deliberately left out: integrate reads accelerations
+    // that may still be being written.
+    recordIntegrateDispatch();
+    recordStepBoundaryBarrier(VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT);
+    check(vkEndCommandBuffer(cmd_), "vkEndCommandBuffer");
+    recordedSteps_ = 0;
+    submitAndWait();
+}
+
 std::vector<Particle> Simulation::readParticles() const {
     std::vector<Particle> result(particleCount_);
     std::memcpy(result.data(), particleReadback_.mapped,
