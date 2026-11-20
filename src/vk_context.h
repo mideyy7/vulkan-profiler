@@ -16,16 +16,28 @@ uint32_t validationMessageCount();
 // Number of messages whose ID starts with "SYNC-HAZARD", for the validation canary test.
 uint32_t syncHazardMessageCount();
 
-// Waits for a fence with no timeout, throwing if the wait fails.
+// Every fence wait in the app goes through waitForFence, which times it. The
+// totals let Phase 7 compare the app's own measurement with the layer's.
+struct FenceWaitStats {
+    uint64_t count = 0;
+    double totalNs = 0.0;
+};
 void waitForFence(VkDevice device, VkFence fence);
+FenceWaitStats fenceWaitStats();
 
-// Recording helpers that leave out arguments this project never uses.
+// Recording wrappers that count commands, so the layer's counts can be checked.
+struct RecordedCommandCounts {
+    uint64_t dispatches = 0;
+    uint64_t barriers = 0;
+    uint64_t copies = 0;
+};
 void cmdDispatch(VkCommandBuffer cmd, uint32_t groupCountX);
 void cmdPipelineBarrier(VkCommandBuffer cmd, VkPipelineStageFlags srcStages,
                         VkPipelineStageFlags dstStages, uint32_t memoryBarrierCount,
                         const VkMemoryBarrier* memoryBarriers, uint32_t bufferBarrierCount,
                         const VkBufferMemoryBarrier* bufferBarriers);
 void cmdCopyBuffer(VkCommandBuffer cmd, VkBuffer src, VkBuffer dst, VkDeviceSize size);
+RecordedCommandCounts recordedCommandCounts();
 
 class VulkanContext {
 public:

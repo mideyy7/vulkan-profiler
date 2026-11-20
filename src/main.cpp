@@ -593,6 +593,16 @@ int runReport(const Options& o) {
             std::printf("\nWrote %s\n", o.csv.c_str());
         }
     }
+    // Totals over the whole run, for comparison with the Vulkan layer (Phase 7).
+    const FenceWaitStats waits = fenceWaitStats();
+    const RecordedCommandCounts commands = recordedCommandCounts();
+    std::printf("\napp fence waits: count=%llu total_us=%.1f mean_us=%.3f\n",
+                static_cast<unsigned long long>(waits.count), waits.totalNs / 1e3,
+                waits.count > 0 ? waits.totalNs / 1e3 / static_cast<double>(waits.count) : 0.0);
+    std::printf("app recorded commands: dispatch=%llu barrier=%llu copy=%llu\n",
+                static_cast<unsigned long long>(commands.dispatches),
+                static_cast<unsigned long long>(commands.barriers),
+                static_cast<unsigned long long>(commands.copies));
     return finishRun(o.validation);
 }
 

@@ -1,9 +1,11 @@
 #include "vk_context.h"
 
 #include <atomic>
+#include <chrono>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <mutex>
 #include <optional>
 #include <stdexcept>
 #include <string>
@@ -17,6 +19,13 @@ constexpr const char* kPortabilitySubsetExtension = "VK_KHR_portability_subset";
 
 std::atomic<uint32_t> gValidationMessages{0};
 std::atomic<uint32_t> gSyncHazardMessages{0};
+
+std::mutex gWaitMutex;
+FenceWaitStats gWaitStats;
+
+std::atomic<uint64_t> gDispatches{0};
+std::atomic<uint64_t> gBarriers{0};
+std::atomic<uint64_t> gCopies{0};
 
 std::vector<VkExtensionProperties> instanceExtensions(const char* layerName) {
     uint32_t count = 0;
@@ -151,10 +160,21 @@ uint32_t syncHazardMessageCount() {
 }
 
 void waitForFence(VkDevice device, VkFence fence) {
+    const auto start = std::chrono::steady_clock::now();
     check(vkWaitForFences(device, 1, &fence, VK_TRUE, UINT64_MAX), "vkWaitForFences");
+    const auto end = std::chrono::steady_clock::now();
+    const std::lock_guard<std::mutex> lock(gWaitMutex);
+    gWaitStats.count += 1;
+    gWaitStats.totalNs += std::chrono::duration<double, std::nano>(end - start).count();
+}
+
+FenceWaitStats fenceWaitStats() {
+    const std::lock_guard<std::mutex> lock(gWaitMutex);
+    return gWaitStats;
 }
 
 void cmdDispatch(VkCommandBuffer cmd, uint32_t groupCountX) {
+    ++gDispatches;
     vkCmdDispatch(cmd, groupCountX, 1, 1);
 }
 
@@ -162,14 +182,20 @@ void cmdPipelineBarrier(VkCommandBuffer cmd, VkPipelineStageFlags srcStages,
                         VkPipelineStageFlags dstStages, uint32_t memoryBarrierCount,
                         const VkMemoryBarrier* memoryBarriers, uint32_t bufferBarrierCount,
                         const VkBufferMemoryBarrier* bufferBarriers) {
+    ++gBarriers;
     vkCmdPipelineBarrier(cmd, srcStages, dstStages, 0, memoryBarrierCount, memoryBarriers,
                          bufferBarrierCount, bufferBarriers, 0, nullptr);
 }
 
 void cmdCopyBuffer(VkCommandBuffer cmd, VkBuffer src, VkBuffer dst, VkDeviceSize size) {
+    ++gCopies;
     VkBufferCopy region{};
     region.size = size;
     vkCmdCopyBuffer(cmd, src, dst, 1, &region);
+}
+
+RecordedCommandCounts recordedCommandCounts() {
+    return {gDispatches.load(), gBarriers.load(), gCopies.load()};
 }
 
 VulkanContext::VulkanContext(bool enableValidation) : validationEnabled_(enableValidation) {
