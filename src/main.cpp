@@ -323,6 +323,52 @@ bool testVectorAdd() {
 }
 
 // ---------------------------------------------------------------------------
+// Simulation tests (Phases 3 to 6)
+// ---------------------------------------------------------------------------
+
+constexpr uint32_t kTestSeeds = 5;
+
+// GPU forces against the double-precision CPU reference (C3, C4).
+bool testForce() {
+    const uint32_t sizes[] = {1, 63, 64, 65, 1000};
+    constexpr double kLimit = 1e-5;
+    VulkanContext ctx;
+    bool passed = true;
+
+    for (uint32_t n : sizes) {
+        double worst = 0.0;
+        for (uint32_t seed = 1; seed <= kTestSeeds; ++seed) {
+            const std::vector<Particle> particles = generateParticles(n, seed);
+            Simulation sim(ctx, particles);
+            const std::vector<std::array<float, 4>> gpu = sim.computeAndReadForces();
+            const std::vector<Vec3d> cpu = cpuForces(particles);
+
+            for (uint32_t i = 0; i < n; ++i) {
+                const double dx = gpu[i][0] - cpu[i].x;
+                const double dy = gpu[i][1] - cpu[i].y;
+                const double dz = gpu[i][2] - cpu[i].z;
+                const double errorNorm = std::sqrt(dx * dx + dy * dy + dz * dz);
+                if (n == 1) {
+                    // A lone particle feels no force, so anything but zero is wrong (C4).
+                    if (errorNorm != 0.0) {
+                        worst = INFINITY;
+                    }
+                    continue;
+                }
+                const double cpuNorm =
+                    std::sqrt(cpu[i].x * cpu[i].x + cpu[i].y * cpu[i].y + cpu[i].z * cpu[i].z);
+                worst = std::max(worst, errorNorm / cpuNorm);
+            }
+        }
+        const bool ok = worst < kLimit;
+        std::printf("  N=%-5u max relative error %.3e over %u seeds: %s\n", n, worst,
+                    kTestSeeds, ok ? "PASS" : "FAIL");
+        passed = passed && ok;
+    }
+    return passed;
+}
+
+// ---------------------------------------------------------------------------
 // Test dispatch
 // ---------------------------------------------------------------------------
 
@@ -341,6 +387,8 @@ int runTest(const std::string& name) {
         passed = testValidationLeak();
     } else if (name == "vector_add") {
         passed = testVectorAdd();
+    } else if (name == "force_naive") {
+        passed = testForce();
     } else {
         std::fprintf(stderr, "Unknown test: %s\n", name.c_str());
         return 2;
