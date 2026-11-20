@@ -3,6 +3,7 @@
 #include "buffers.h"
 #include "vk_context.h"
 
+#include <chrono>
 #include <cmath>
 #include <cstring>
 #include <fstream>
@@ -272,6 +273,7 @@ void Simulation::create(const std::vector<Particle>& particles) {
 
 void Simulation::destroy() {
     const VkDevice device = ctx_.device();
+    if (queryPool_ != VK_NULL_HANDLE) vkDestroyQueryPool(device, queryPool_, nullptr);
     if (fence_ != VK_NULL_HANDLE) vkDestroyFence(device, fence_, nullptr);
     if (cmdPool_ != VK_NULL_HANDLE) vkDestroyCommandPool(device, cmdPool_, nullptr);
     if (descPool_ != VK_NULL_HANDLE) vkDestroyDescriptorPool(device, descPool_, nullptr);
@@ -285,6 +287,7 @@ void Simulation::destroy() {
     if (integrateModule_ != VK_NULL_HANDLE)
         vkDestroyShaderModule(device, integrateModule_, nullptr);
     if (forceModule_ != VK_NULL_HANDLE) vkDestroyShaderModule(device, forceModule_, nullptr);
+    queryPool_ = VK_NULL_HANDLE;
     fence_ = VK_NULL_HANDLE;
     cmdPool_ = VK_NULL_HANDLE;
     descPool_ = VK_NULL_HANDLE;
@@ -317,6 +320,11 @@ void Simulation::beginCommands(VkCommandBufferUsageFlags flags) {
     vkCmdPushConstants(cmd_, pipelineLayout_, VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof(pc), &pc);
     vkCmdBindDescriptorSets(cmd_, VK_PIPELINE_BIND_POINT_COMPUTE, pipelineLayout_, 0, 1,
                             &descSet_, 0, nullptr);
+}
+
+void Simulation::writeTimestamp(uint32_t query) {
+    // BOTTOM_OF_PIPE waits for all earlier commands to finish (C10).
+    vkCmdWriteTimestamp(cmd_, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, queryPool_, query);
 }
 
 void Simulation::recordForceDispatch() {
@@ -367,13 +375,31 @@ void Simulation::recordStepBoundaryBarrier(VkPipelineStageFlags srcStages) {
 }
 
 void Simulation::recordBatch(uint32_t steps) {
+    // Query pool sized for this batch's timestamps (4 per step + 2).
+    if (queryPool_ != VK_NULL_HANDLE) {
+        vkDestroyQueryPool(ctx_.device(), queryPool_, nullptr);
+        queryPool_ = VK_NULL_HANDLE;
+    }
+    queryCount_ = 4 * steps + 2;
+    VkQueryPoolCreateInfo queryInfo{};
+    queryInfo.sType = VK_STRUCTURE_TYPE_QUERY_POOL_CREATE_INFO;
+    queryInfo.queryType = VK_QUERY_TYPE_TIMESTAMP;
+    queryInfo.queryCount = queryCount_;
+    check(vkCreateQueryPool(ctx_.device(), &queryInfo, nullptr, &queryPool_),
+          "vkCreateQueryPool");
+
     // No ONE_TIME_SUBMIT flag: this command buffer is submitted many times.
     beginCommands(0);
+    vkCmdResetQueryPool(cmd_, queryPool_, 0, queryCount_);
 
     for (uint32_t k = 0; k < steps; ++k) {
+        writeTimestamp(4 * k);
         recordForceDispatch();
+        writeTimestamp(4 * k + 1);
         recordForceBarrier();
+        writeTimestamp(4 * k + 2);
         recordIntegrateDispatch();
+        writeTimestamp(4 * k + 3);
         if (k + 1 < steps) {
             recordStepBoundaryBarrier(VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT);
         }
@@ -391,8 +417,10 @@ void Simulation::recordBatch(uint32_t steps) {
     toTransfer.size = VK_WHOLE_SIZE;
     cmdPipelineBarrier(cmd_, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
                        VK_PIPELINE_STAGE_TRANSFER_BIT, 0, nullptr, 1, &toTransfer);
+    writeTimestamp(4 * steps);
 
     cmdCopyBuffer(cmd_, particleBuf_.buffer, particleReadback_.buffer, particleBuf_.size);
+    writeTimestamp(4 * steps + 1);
 
     VkBufferMemoryBarrier toHost{};
     toHost.sType = VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER;
@@ -415,15 +443,26 @@ void Simulation::recordBatch(uint32_t steps) {
     recordedSteps_ = steps;
 }
 
-void Simulation::submitAndWait() {
+void Simulation::submitAndWait(BatchSample* sample) {
     VkSubmitInfo submitInfo{};
     submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
     submitInfo.commandBufferCount = 1;
     submitInfo.pCommandBuffers = &cmd_;
 
     check(vkResetFences(ctx_.device(), 1, &fence_), "vkResetFences");
+
+    using Clock = std::chrono::steady_clock;
+    const Clock::time_point start = Clock::now();
     check(vkQueueSubmit(ctx_.queue(), 1, &submitInfo, fence_), "vkQueueSubmit");
+    const Clock::time_point submitted = Clock::now();
     waitForFence(ctx_.device(), fence_);
+    const Clock::time_point finished = Clock::now();
+
+    if (sample != nullptr) {
+        sample->submitNs = std::chrono::duration<double, std::nano>(submitted - start).count();
+        sample->waitNs = std::chrono::duration<double, std::nano>(finished - submitted).count();
+        sample->frameNs = std::chrono::duration<double, std::nano>(finished - start).count();
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -470,21 +509,39 @@ std::vector<std::array<float, 4>> Simulation::computeAndReadForces() {
 
     check(vkEndCommandBuffer(cmd_), "vkEndCommandBuffer");
     recordedSteps_ = 0;
-    submitAndWait();
+    submitAndWait(nullptr);
 
     std::vector<std::array<float, 4>> result(particleCount_);
     std::memcpy(result.data(), accelReadback_.mapped, static_cast<size_t>(accelSize));
     return result;
 }
 
-void Simulation::runBatch(uint32_t steps) {
+BatchSample Simulation::runBatch(uint32_t steps) {
     if (steps == 0) {
         throw std::runtime_error("runBatch needs at least one step");
     }
     if (recordedSteps_ != steps) {
         recordBatch(steps);
     }
-    submitAndWait();
+
+    BatchSample sample;
+    sample.steps = steps;
+    submitAndWait(&sample);
+
+    std::vector<uint64_t> raw(queryCount_);
+    check(vkGetQueryPoolResults(ctx_.device(), queryPool_, 0, queryCount_,
+                                raw.size() * sizeof(uint64_t), raw.data(), sizeof(uint64_t),
+                                VK_QUERY_RESULT_64_BIT | VK_QUERY_RESULT_WAIT_BIT),
+          "vkGetQueryPoolResults");
+
+    const uint32_t validBits = ctx_.timestampValidBits();
+    const uint64_t mask = validBits >= 64 ? ~0ull : ((1ull << validBits) - 1);
+    sample.ticks.resize(queryCount_);
+    for (uint32_t q = 0; q < queryCount_; ++q) {
+        sample.ticks[q] = raw[q] & mask;
+    }
+    sample.nsPerTick = static_cast<double>(ctx_.timestampPeriod());
+    return sample;
 }
 
 void Simulation::stepMissingBarrier() {
@@ -496,7 +553,7 @@ void Simulation::stepMissingBarrier() {
     recordStepBoundaryBarrier(VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT);
     check(vkEndCommandBuffer(cmd_), "vkEndCommandBuffer");
     recordedSteps_ = 0;
-    submitAndWait();
+    submitAndWait(nullptr);
 }
 
 std::vector<Particle> Simulation::readParticles() const {

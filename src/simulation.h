@@ -64,6 +64,21 @@ std::vector<Vec3d> cpuForces(const std::vector<Particle>& particles);
 // Simulation
 // ---------------------------------------------------------------------------
 
+// Timings from one submission of `steps` simulation steps.
+//
+// Timestamp layout (C10), all written at BOTTOM_OF_PIPE:
+//   step k: [4k] before force, [4k+1] after force,
+//           [4k+2] after the force->integrate barrier, [4k+3] after integrate
+//   end:    [4K] after the readback barrier, [4K+1] after the readback copy
+struct BatchSample {
+    uint32_t steps = 0;
+    std::vector<uint64_t> ticks;   // Raw GPU timestamps, masked to the valid bits.
+    double nsPerTick = 1.0;        // timestampPeriod
+    double submitNs = 0.0;         // CPU time inside vkQueueSubmit
+    double waitNs = 0.0;           // CPU time inside the fence wait
+    double frameNs = 0.0;          // Submit start to wait end (C11)
+};
+
 class Simulation {
 public:
     Simulation(VulkanContext& ctx, const std::vector<Particle>& particles);
@@ -78,7 +93,7 @@ public:
 
     // Run `steps` full steps in one command buffer, one submit and one fence
     // wait, then copy the particles back. steps = 1 is the unbatched case.
-    void runBatch(uint32_t steps);
+    BatchSample runBatch(uint32_t steps);
 
     // One step with the force->integrate barrier deliberately left out (C2 canary).
     void stepMissingBarrier();
@@ -97,7 +112,8 @@ private:
     void recordIntegrateDispatch();
     void recordStepBoundaryBarrier(VkPipelineStageFlags srcStages);
     void recordBatch(uint32_t steps);
-    void submitAndWait();
+    void writeTimestamp(uint32_t query);
+    void submitAndWait(BatchSample* sample);
 
     VulkanContext& ctx_;
     uint32_t particleCount_;
@@ -119,8 +135,10 @@ private:
     VkCommandPool cmdPool_ = VK_NULL_HANDLE;
     VkCommandBuffer cmd_ = VK_NULL_HANDLE;
     VkFence fence_ = VK_NULL_HANDLE;
+    VkQueryPool queryPool_ = VK_NULL_HANDLE;
 
     // Steps recorded in cmd_ by recordBatch, or 0 if cmd_ holds something else.
-    // A batch is recorded once and then resubmitted.
+    // A batch is recorded once and resubmitted, so recording is not timed.
     uint32_t recordedSteps_ = 0;
+    uint32_t queryCount_ = 0;
 };
