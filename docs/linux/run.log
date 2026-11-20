@@ -1,0 +1,220 @@
+
+=== 1. NVIDIA driver
+NVIDIA GeForce RTX 4090, 580.178.04
+
+=== 2. Build tools and Vulkan packages
+W: https://developer.download.nvidia.com/compute/cuda/repos/ubuntu2404/x86_64/InRelease: Key is stored in legacy trusted.gpg keyring (/etc/apt/trusted.gpg), see the DEPRECATION section in apt-key(8) for details.
+
+=== 3. Vulkan must see the NVIDIA GPU
+	deviceName         = NVIDIA GeForce RTX 4090
+	driverName         = NVIDIA
+	driverInfo         = 580.178.04
+	deviceName         = llvmpipe (LLVM 20.1.2, 256 bits)
+	driverName         = llvmpipe
+	driverInfo         = Mesa 25.2.8-0ubuntu0.24.04.5 (LLVM 20.1.2)
+
+=== 4. Build
+-- The CXX compiler identification is GNU 13.3.0
+-- Detecting CXX compiler ABI info
+-- Detecting CXX compiler ABI info - done
+-- Check for working CXX compiler: /usr/bin/c++ - skipped
+-- Detecting CXX compile features
+-- Detecting CXX compile features - done
+-- Found Vulkan: /usr/lib/x86_64-linux-gnu/libvulkan.so (found version "1.3.275") found components: glslc missing components: glslangValidator
+-- Found Python3: /usr/bin/python3 (found version "3.12.3") found components: Interpreter 
+-- Configuring done (0.3s)
+-- Generating done (0.0s)
+-- Build files have been written to: /root/vulkan-profiler/build
+[ 16%] Compiling shader force_calc_tiled.comp
+[ 16%] Compiling shader force_calc.comp
+[ 25%] Compiling shader vector_add.comp
+[ 33%] Compiling shader integrate.comp
+[ 41%] Building CXX object CMakeFiles/VkLayer_stage_profiler.dir/layer/stage_layer.cpp.o
+[ 41%] Built target shaders
+[ 50%] Building CXX object CMakeFiles/gpu_profiler.dir/src/vk_context.cpp.o
+[ 66%] Building CXX object CMakeFiles/gpu_profiler.dir/src/report.cpp.o
+[ 66%] Building CXX object CMakeFiles/gpu_profiler.dir/src/buffers.cpp.o
+[ 75%] Building CXX object CMakeFiles/gpu_profiler.dir/src/main.cpp.o
+[ 83%] Building CXX object CMakeFiles/gpu_profiler.dir/src/simulation.cpp.o
+[ 91%] Linking CXX shared module layer/libVkLayer_stage_profiler.so
+[ 91%] Built target VkLayer_stage_profiler
+[100%] Linking CXX executable gpu_profiler
+[100%] Built target gpu_profiler
+
+=== 5. Tests (with validation on)
+Internal ctest changing into directory: /root/vulkan-profiler/build
+Test project /root/vulkan-profiler/build
+      Start  1: info
+ 1/14 Test  #1: info .............................   Passed    0.27 sec
+      Start  2: clean_shutdown
+ 2/14 Test  #2: clean_shutdown ...................   Passed    0.27 sec
+      Start  3: validation_live
+ 3/14 Test  #3: validation_live ..................   Passed    0.29 sec
+      Start  4: validation_leak
+ 4/14 Test  #4: validation_leak ..................   Passed    0.27 sec
+      Start  5: vector_add
+ 5/14 Test  #5: vector_add .......................   Passed    1.18 sec
+      Start  6: force_naive
+ 6/14 Test  #6: force_naive ......................   Passed    0.43 sec
+      Start  7: force_tiled
+ 7/14 Test  #7: force_tiled ......................   Passed    0.43 sec
+      Start  8: momentum
+ 8/14 Test  #8: momentum .........................   Passed    0.48 sec
+      Start  9: validation_canary
+ 9/14 Test  #9: validation_canary ................   Passed    0.28 sec
+      Start 10: timestamps
+10/14 Test #10: timestamps .......................   Passed    0.29 sec
+      Start 11: stats
+11/14 Test #11: stats ............................   Passed    0.00 sec
+      Start 12: batch_equivalence
+12/14 Test #12: batch_equivalence ................   Passed    0.44 sec
+      Start 13: validation_modes
+13/14 Test #13: validation_modes .................   Passed    0.30 sec
+      Start 14: layer_check
+14/14 Test #14: layer_check ......................   Passed    0.84 sec
+
+100% tests passed, 0 tests failed out of 14
+
+Total Test time (real) =   5.76 sec
+
+=== 6. Benchmarks (validation off)
+
+--- Machine ---
+Linux 6.8.0-138-generic x86_64
+PRETTY_NAME="Ubuntu 24.04.1 LTS"
+ 16:55:41 up 28 days, 57 min,  0 user,  load average: 3.28, 2.95, 2.93
+
+--- GPU hardware ---
+lspci not available
+NVIDIA GeForce RTX 4090, 580.178.04
+
+--- Render device access ---
+/dev/dri/renderD132: accessible
+
+--- Vulkan drivers installed ---
+/etc/vulkan/icd.d/nvidia_icd.json
+/usr/share/vulkan/icd.d/asahi_icd.json
+/usr/share/vulkan/icd.d/gfxstream_vk_icd.json
+/usr/share/vulkan/icd.d/intel_hasvk_icd.json
+/usr/share/vulkan/icd.d/intel_icd.json
+/usr/share/vulkan/icd.d/lvp_icd.json
+/usr/share/vulkan/icd.d/nouveau_icd.json
+/usr/share/vulkan/icd.d/radeon_icd.json
+/usr/share/vulkan/icd.d/virtio_icd.json
+
+--- Vulkan devices ---
+	deviceType         = PHYSICAL_DEVICE_TYPE_DISCRETE_GPU
+	deviceName         = NVIDIA GeForce RTX 4090
+	driverName         = NVIDIA
+	driverInfo         = 580.178.04
+	deviceType         = PHYSICAL_DEVICE_TYPE_CPU
+	deviceName         = llvmpipe (LLVM 20.1.2, 256 bits)
+	driverName         = llvmpipe
+	driverInfo         = Mesa 25.2.8-0ubuntu0.24.04.5 (LLVM 20.1.2)
+
+--- Build tools ---
+cmake: found
+c++: found
+glslc: found
+vulkan headers: found
+validation layer: found
+
+--- Result ---
+READY
+       N  batch  kernel     frame_us    frame_p99       gpu_us  overhead_us
+     256      1   naive        48.78        50.47        19.80        28.99
+     512      1   naive        60.27        63.73        31.34        28.93
+    1024      1   naive        91.47        88.72        54.73        36.74
+    2048      1   naive       140.11       143.09       102.36        37.76
+    4096      1   naive       255.22       248.21       193.82        61.41
+    8192      1   naive       452.18       455.54       423.26        28.92
+   16384      1   naive       878.10       918.43       848.90        29.21
+   32768      1   naive      1864.41      1870.98      1834.74        29.67
+Wrote docs/linux/sweep_naive_batch1_run1.csv
+       N  batch  kernel     frame_us    frame_p99       gpu_us  overhead_us
+     256     32   naive        16.36        16.37        15.31         1.04
+     512     32   naive        27.25        27.37        26.13         1.12
+    1024     32   naive        48.51        48.61        47.27         1.25
+    2048     32   naive        91.97        92.07        90.52         1.45
+    4096     32   naive       177.30       177.44       175.35         1.95
+    8192     32   naive       347.93       348.17       346.60         1.32
+   16384     32   naive       725.60       727.27       723.62         1.98
+   32768     32   naive      1643.76      1653.48      1640.73         3.03
+Wrote docs/linux/sweep_naive_batch32_run1.csv
+       N  batch  kernel     frame_us    frame_p99       gpu_us  overhead_us
+     256     32   tiled        11.80        11.85        10.77         1.03
+     512     32   tiled        16.75        16.88        15.65         1.10
+    1024     32   tiled        26.24        26.28        25.01         1.23
+    2048     32   tiled        45.36        45.43        43.89         1.46
+    4096     32   tiled        83.69        83.76        81.92         1.77
+    8192     32   tiled       160.88       161.12       159.69         1.19
+   16384     32   tiled       322.88       324.19       321.69         1.19
+   32768     32   tiled       899.29       988.22       897.45         1.84
+Wrote docs/linux/sweep_tiled_batch32_run1.csv
+       N  batch  kernel     frame_us    frame_p99       gpu_us  overhead_us
+     256      1   naive        46.22        48.65        18.32        27.89
+     512      1   naive        56.98        59.87        28.91        28.07
+    1024      1   naive        89.60        87.50        50.45        39.15
+    2048      1   naive       132.73       135.40        94.10        38.63
+    4096      1   naive       241.74       236.65       180.11        61.63
+    8192      1   naive       424.71       430.20       395.99        28.72
+   16384      1   naive       861.49       866.04       831.42        30.07
+   32768      1   naive      1883.06      1895.59      1852.38        30.68
+Wrote docs/linux/sweep_naive_batch1_run2.csv
+       N  batch  kernel     frame_us    frame_p99       gpu_us  overhead_us
+     256     32   naive        16.48        16.57        15.31         1.17
+     512     32   naive        27.20        27.23        26.11         1.09
+    1024     32   naive        48.44        48.53        47.28         1.16
+    2048     32   naive        91.94        92.03        90.50         1.44
+    4096     32   naive       177.23       177.32       175.42         1.81
+    8192     32   naive       347.79       347.88       346.68         1.11
+   16384     32   naive       725.75       727.59       723.82         1.93
+   32768     32   naive      1644.98      1662.63      1643.05         1.92
+Wrote docs/linux/sweep_naive_batch32_run2.csv
+       N  batch  kernel     frame_us    frame_p99       gpu_us  overhead_us
+     256     32   tiled        11.94        11.99        10.84         1.10
+     512     32   tiled        16.80        16.98        15.68         1.12
+    1024     32   tiled        26.40        26.45        25.12         1.28
+    2048     32   tiled        45.63        45.80        44.17         1.46
+    4096     32   tiled        84.15        84.37        82.23         1.92
+    8192     32   tiled       160.99       161.13       159.86         1.13
+   16384     32   tiled       322.62       323.18       321.40         1.22
+   32768     32   tiled       857.19       870.94       855.57         1.62
+Wrote docs/linux/sweep_tiled_batch32_run2.csv
+       N  batch  kernel     frame_us    frame_p99       gpu_us  overhead_us
+     256      1   naive        46.54        49.30        18.34        28.21
+     512      1   naive        58.73        65.93        29.15        29.58
+    1024      1   naive        89.60        86.61        50.67        38.93
+    2048      1   naive       134.37       138.62        94.66        39.71
+    4096      1   naive       239.58       233.15       181.06        58.51
+    8192      1   naive       430.39       434.94       401.52        28.86
+   16384      1   naive       862.60       867.12       832.94        29.66
+   32768      1   naive      1882.92      1892.00      1853.05        29.87
+Wrote docs/linux/sweep_naive_batch1_run3.csv
+       N  batch  kernel     frame_us    frame_p99       gpu_us  overhead_us
+     256     32   naive        16.46        16.47        15.40         1.05
+     512     32   naive        27.31        27.37        26.21         1.10
+    1024     32   naive        48.75        48.85        47.53         1.21
+    2048     32   naive        92.36        92.44        90.97         1.39
+    4096     32   naive       177.89       178.00       176.22         1.67
+    8192     32   naive       348.80       348.90       347.68         1.12
+   16384     32   naive       726.52       726.85       725.11         1.41
+   32768     32   naive      1645.40      1665.95      1643.22         2.18
+Wrote docs/linux/sweep_naive_batch32_run3.csv
+       N  batch  kernel     frame_us    frame_p99       gpu_us  overhead_us
+     256     32   tiled        11.86        11.89        10.82         1.04
+     512     32   tiled        16.75        16.80        15.65         1.10
+    1024     32   tiled        26.33        26.37        25.13         1.20
+    2048     32   tiled        45.76        46.09        44.11         1.65
+    4096     32   tiled        84.17        84.27        82.26         1.91
+    8192     32   tiled       161.60       161.65       160.46         1.14
+   16384     32   tiled       324.01       324.34       322.48         1.53
+   32768     32   tiled       864.92       920.02       862.86         2.07
+Wrote docs/linux/sweep_tiled_batch32_run3.csv
+Wrote results to docs/linux
+
+=== Done
+Results: /root/vulkan-profiler/linux-results.tgz
+Copy it to your Mac before stopping the machine, e.g.:
+  scp <user>@<machine-address>:/root/vulkan-profiler/linux-results.tgz .
+EXIT=0

@@ -1,0 +1,13 @@
+Device name:                  NVIDIA GeForce RTX 4090
+Device type:                  discrete GPU
+Vulkan API version:           1.4.312
+Driver:                       NVIDIA 580.178.04
+Driver version (raw):         2435612928
+Compute queue family:         0
+timestampPeriod:              1.000000 ns/tick
+timestampComputeAndGraphics:  true
+timestampValidBits:           64
+Max workgroup size:           1024 x 1024 x 64
+Max workgroup invocations:    1024
+Max shared memory:            49152 bytes
+Validation messages:          0

@@ -1,0 +1,4 @@
+Machine load before the run (C14):
+ 16:55:42 up 28 days, 57 min,  0 user,  load average: 3.28, 2.95, 2.93
+uptime after:
+ 16:56:00 up 28 days, 57 min,  0 user,  load average: 3.21, 2.95, 2.93

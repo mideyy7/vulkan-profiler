@@ -1,0 +1,20 @@
+# gpu: NVIDIA GeForce RTX 4090
+# driver: NVIDIA 580.178.04
+# particles: 2048
+# batch: 4
+# kernel: naive
+# warmup_steps: 20
+# measured_steps: 200
+# validation: off
+stage,mean_ns,min_ns,p50_ns,p99_ns,max_ns,percent_of_frame,samples
+force,87020.8,86016,87040,88992,89088,85.5102,200
+force->integrate barrier,780.32,0,1024,1024,2048,0.766775,200
+integrate,2319.36,2048,2048,3072,3072,2.2791,200
+step barrier,737.28,0,1024,1024,1024,0.543361,150
+readback barrier,184.32,0,256,256,256,0.18112,50
+readback copy,810.4,680,816,920,920,0.796332,50
+gpu span,91668.2,91440,91680,92272,92272,90.0769,50
+cpu submit,761.68,707.5,757.5,970.25,970.25,0.748458,50
+cpu fence wait,101005,100628,100935,102260,102260,99.2515,50
+frame,101767,101335,101715,103028,103028,100,50
+overhead (frame - gpu),10098.4,9631.25,10074.8,10884.8,10884.8,9.9231,50
