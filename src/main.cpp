@@ -479,6 +479,40 @@ bool testStats() {
     return passed;
 }
 
+// Batched and unbatched runs must give bit-identical particles (C9).
+bool testBatchEquivalence() {
+    constexpr uint32_t kTotalSteps = 800;  // Divisible by 16, 25 and 32.
+    const std::vector<Particle> initial = generateParticles(256, 1);
+    VulkanContext ctx;
+
+    Simulation reference(ctx, initial);
+    for (uint32_t s = 0; s < kTotalSteps; ++s) {
+        reference.runBatch(1);
+    }
+    const std::vector<Particle> expected = reference.readParticles();
+
+    bool passed = true;
+    for (uint32_t K : {16u, 25u, 32u}) {
+        Simulation batched(ctx, initial);
+        for (uint32_t s = 0; s < kTotalSteps; s += K) {
+            batched.runBatch(K);
+        }
+        const std::vector<Particle> got = batched.readParticles();
+        double maxDelta = 0.0;
+        const float* x = &expected[0].px;
+        const float* y = &got[0].px;
+        for (size_t f = 0; f < expected.size() * 8; ++f) {
+            maxDelta = std::max(maxDelta, std::fabs(static_cast<double>(x[f]) - y[f]));
+        }
+        const bool identical =
+            std::memcmp(expected.data(), got.data(), expected.size() * sizeof(Particle)) == 0;
+        std::printf("  K=%-2u max|delta| = %g, bytes identical: %s\n", K, maxDelta,
+                    identical ? "yes" : "no");
+        passed = passed && identical && maxDelta == 0.0;
+    }
+    return passed;
+}
+
 // ---------------------------------------------------------------------------
 // --report
 // ---------------------------------------------------------------------------
@@ -612,6 +646,8 @@ int runTest(const std::string& name) {
         passed = testTimestamps();
     } else if (name == "stats") {
         passed = testStats();
+    } else if (name == "batch_equivalence") {
+        passed = testBatchEquivalence();
     } else {
         std::fprintf(stderr, "Unknown test: %s\n", name.c_str());
         return 2;
