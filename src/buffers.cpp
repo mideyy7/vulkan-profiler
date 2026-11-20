@@ -81,6 +81,18 @@ void uploadToDeviceLocal(const VulkanContext& ctx, Buffer& dst, const void* data
 
     cmdCopyBuffer(cmd, staging.buffer, dst.buffer, dataSize);
 
+    // Make the copied data visible to any later shader or transfer that uses
+    // dst, including those in later submissions. Waiting on the fence alone
+    // does not do this.
+    VkMemoryBarrier uploaded{};
+    uploaded.sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER;
+    uploaded.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+    uploaded.dstAccessMask =
+        VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT | VK_ACCESS_TRANSFER_READ_BIT;
+    cmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_TRANSFER_BIT,
+                       VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT | VK_PIPELINE_STAGE_TRANSFER_BIT, 1,
+                       &uploaded, 0, nullptr);
+
     check(vkEndCommandBuffer(cmd), "vkEndCommandBuffer");
 
     // Submit and wait.
