@@ -480,6 +480,110 @@ bool testStats() {
 }
 
 // ---------------------------------------------------------------------------
+// --report
+// ---------------------------------------------------------------------------
+
+struct Options {
+    uint32_t particles = 2048;
+    uint32_t batch = 1;
+    uint32_t steps = 200;
+    uint32_t warmup = 20;
+    uint32_t seed = 1;
+    std::string csv;
+    bool validation = true;
+};
+
+uint32_t ceilDiv(uint32_t a, uint32_t b) {
+    return (a + b - 1) / b;
+}
+
+// Warm-up then measured batches (C8). Returns per-stage rows.
+std::vector<StageRow> measure(VulkanContext& ctx, const Options& o, uint32_t particles,
+                              RunInfo& info) {
+    Simulation sim(ctx, generateParticles(particles, o.seed));
+    const uint32_t warmupBatches = ceilDiv(o.warmup, o.batch);
+    const uint32_t measuredBatches = ceilDiv(o.steps, o.batch);
+    for (uint32_t b = 0; b < warmupBatches; ++b) {
+        sim.runBatch(o.batch);
+    }
+    std::vector<BatchSample> samples;
+    for (uint32_t b = 0; b < measuredBatches; ++b) {
+        samples.push_back(sim.runBatch(o.batch));
+    }
+
+    info.device = ctx.deviceName();
+    info.driver = ctx.driverDescription();
+    info.particles = particles;
+    info.batch = o.batch;
+    info.kernel = "naive";
+    info.warmupSteps = warmupBatches * o.batch;
+    info.measuredSteps = measuredBatches * o.batch;
+    info.validation = ctx.validationEnabled();
+    return buildStageRows(samples);
+}
+
+int finishRun(bool validation) {
+    if (validation && validationMessageCount() > 0) {
+        std::printf("FAIL: %u validation messages\n", validationMessageCount());
+        return 1;
+    }
+    return 0;
+}
+
+int runReport(const Options& o) {
+    {
+        VulkanContext ctx(o.validation);
+        RunInfo info;
+        const std::vector<StageRow> rows = measure(ctx, o, o.particles, info);
+        printReport(info, rows);
+        if (!o.csv.empty()) {
+            writeReportCsv(o.csv, info, rows);
+            std::printf("\nWrote %s\n", o.csv.c_str());
+        }
+    }
+    return finishRun(o.validation);
+}
+
+uint32_t parseCount(const std::string& flag, const char* value) {
+    const unsigned long parsed = std::stoul(value);
+    if (parsed == 0 || parsed > 1000000) {
+        throw std::runtime_error(flag + " must be between 1 and 1000000");
+    }
+    return static_cast<uint32_t>(parsed);
+}
+
+Options parseOptions(int argc, char** argv, int first) {
+    Options o;
+    for (int a = first; a < argc; ++a) {
+        const std::string flag = argv[a];
+        if (flag == "--no-validation") {
+            o.validation = false;
+            continue;
+        }
+        if (a + 1 >= argc) {
+            throw std::runtime_error("missing value after " + flag);
+        }
+        const char* value = argv[++a];
+        if (flag == "--n") {
+            o.particles = parseCount(flag, value);
+        } else if (flag == "--batch") {
+            o.batch = parseCount(flag, value);
+        } else if (flag == "--steps") {
+            o.steps = parseCount(flag, value);
+        } else if (flag == "--warmup") {
+            o.warmup = parseCount(flag, value);
+        } else if (flag == "--seed") {
+            o.seed = parseCount(flag, value);
+        } else if (flag == "--csv") {
+            o.csv = value;
+        } else {
+            throw std::runtime_error("unknown option " + flag);
+        }
+    }
+    return o;
+}
+
+// ---------------------------------------------------------------------------
 // Test dispatch
 // ---------------------------------------------------------------------------
 
@@ -523,7 +627,10 @@ int runTest(const std::string& name) {
 int printUsage() {
     std::fprintf(stderr,
                  "Usage: gpu_profiler --info\n"
-                 "       gpu_profiler --test <name>\n");
+                 "       gpu_profiler --test <name>\n"
+                 "       gpu_profiler --report [options]\n"
+                 "Options: --n N  --batch K  --steps S  --warmup W\n"
+                 "         --seed S  --csv PATH  --no-validation\n");
     return 2;
 }
 
@@ -537,6 +644,9 @@ int main(int argc, char** argv) {
         }
         if (argc == 3 && mode == "--test") {
             return runTest(argv[2]);
+        }
+        if (mode == "--report") {
+            return runReport(parseOptions(argc, argv, 2));
         }
         return printUsage();
     } catch (const std::exception& error) {
