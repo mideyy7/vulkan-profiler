@@ -1,0 +1,71 @@
+#version 450
+
+// Same maths as force_calc.comp, but each workgroup copies 64 particles at a
+// time into fast on-chip shared memory and every invocation reads them from
+// there, instead of each invocation reading every particle from global memory.
+
+layout(local_size_x = 64) in;
+
+struct Particle {
+    vec4 pos_mass;   // xyz = position, w = mass
+    vec4 vel_pad;    // xyz = velocity, w = unused
+};
+
+layout(std430, set = 0, binding = 0) readonly buffer Particles {
+    Particle particles[];
+};
+
+layout(std430, set = 0, binding = 1) writeonly buffer Accelerations {
+    vec4 accelerations[];
+};
+
+layout(push_constant) uniform PushConstants {
+    uint count;
+    float G;
+    float softening;
+    float dt;
+};
+
+const uint TILE_SIZE = 64;   // Must equal local_size_x: one load per invocation.
+
+shared vec4 tile[TILE_SIZE];
+
+void main() {
+    uint i = gl_GlobalInvocationID.x;
+    uint local = gl_LocalInvocationID.x;
+
+    // No early return (C12): every invocation must reach every barrier(), even
+    // one past the end of the array. Inactive invocations only skip memory accesses.
+    bool inRange = i < count;
+    vec3 pos_i = inRange ? particles[i].pos_mass.xyz : vec3(0.0);
+    vec3 acc = vec3(0.0);
+    float eps2 = softening * softening;
+
+    uint tileCount = (count + TILE_SIZE - 1) / TILE_SIZE;
+    for (uint t = 0; t < tileCount; ++t) {
+        uint tileStart = t * TILE_SIZE;
+
+        // Each invocation loads one particle of this tile.
+        uint j = tileStart + local;
+        tile[local] = j < count ? particles[j].pos_mass : vec4(0.0);
+
+        // Wait until the whole tile is loaded before anyone reads it.
+        barrier();
+
+        // The last tile may be partial.
+        uint tileLength = min(TILE_SIZE, count - tileStart);
+        for (uint k = 0; k < tileLength; ++k) {
+            vec3 r = tile[k].xyz - pos_i;
+            float dist2 = dot(r, r) + eps2;
+            float inv_dist3 = 1.0 / (dist2 * sqrt(dist2));
+            acc += G * tile[k].w * r * inv_dist3;
+        }
+
+        // Wait until everyone has finished with this tile before it is overwritten.
+        barrier();
+    }
+
+    if (inRange) {
+        accelerations[i] = vec4(acc, 0.0);
+    }
+}
