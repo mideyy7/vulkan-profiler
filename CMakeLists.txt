@@ -30,10 +30,12 @@ foreach(SHADER_SOURCE IN LISTS SHADER_SOURCES)
 endforeach()
 add_custom_target(shaders ALL DEPENDS ${SHADER_BINARIES})
 
-add_executable(gpu_profiler src/main.cpp src/vk_context.cpp src/buffers.cpp)
+add_executable(gpu_profiler src/main.cpp src/vk_context.cpp src/buffers.cpp src/simulation.cpp)
 add_dependencies(gpu_profiler shaders)
 target_compile_options(gpu_profiler PRIVATE -Wall -Wextra -Wpedantic)
 target_link_libraries(gpu_profiler PRIVATE Vulkan::Vulkan)
+# Lets the program find compiled shaders whatever folder it is run from.
+target_compile_definitions(gpu_profiler PRIVATE GPU_PROFILER_SHADER_DIR="${SHADER_OUTPUT_DIR}")
 
 # Homebrew's validation layer manifest names its library without a folder, so the
 # program must search Homebrew's library folder when the loader opens the layer.

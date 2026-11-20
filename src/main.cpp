@@ -1,44 +1,18 @@
 #include "buffers.h"
+#include "simulation.h"
 #include "vk_context.h"
 
+#include <algorithm>
 #include <cmath>
 #include <cstdio>
 #include <cstring>
 #include <exception>
 #include <fstream>
+#include <stdexcept>
 #include <string>
 #include <vector>
 
 namespace {
-
-// ---------------------------------------------------------------------------
-// Helpers
-// ---------------------------------------------------------------------------
-
-std::vector<uint32_t> loadShader(const std::string& path) {
-    std::ifstream file(path, std::ios::ate | std::ios::binary);
-    if (!file.is_open()) {
-        throw std::runtime_error("failed to open shader: " + path);
-    }
-    const size_t fileSize = static_cast<size_t>(file.tellg());
-    if (fileSize % sizeof(uint32_t) != 0) {
-        throw std::runtime_error("shader file size is not a multiple of 4: " + path);
-    }
-    std::vector<uint32_t> code(fileSize / sizeof(uint32_t));
-    file.seekg(0);
-    file.read(reinterpret_cast<char*>(code.data()), static_cast<std::streamsize>(fileSize));
-    return code;
-}
-
-VkShaderModule createShaderModule(VkDevice device, const std::vector<uint32_t>& code) {
-    VkShaderModuleCreateInfo info{};
-    info.sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO;
-    info.codeSize = code.size() * sizeof(uint32_t);
-    info.pCode = code.data();
-    VkShaderModule module = VK_NULL_HANDLE;
-    check(vkCreateShaderModule(device, &info, nullptr, &module), "vkCreateShaderModule");
-    return module;
-}
 
 // ---------------------------------------------------------------------------
 // --info
@@ -148,7 +122,7 @@ bool testVectorAdd() {
         uploadToDeviceLocal(ctx, bufB, hostB.data(), bufSize);
 
         // Load the shader and create the pipeline.
-        const std::vector<uint32_t> code = loadShader("shaders/vector_add.comp.spv");
+        const std::vector<uint32_t> code = loadShader(shaderPath("vector_add.comp.spv"));
         VkShaderModule shaderModule = createShaderModule(ctx.device(), code);
 
         // Descriptor set layout: 3 storage buffers at bindings 0, 1, 2.
@@ -353,6 +327,11 @@ bool testVectorAdd() {
 // ---------------------------------------------------------------------------
 
 int runTest(const std::string& name) {
+    // These tests deliberately cause validation messages, so they are not
+    // also required to finish with zero messages.
+    const bool expectsMessages =
+        name == "validation_live" || name == "validation_leak";
+
     bool passed = false;
     if (name == "clean_shutdown") {
         passed = testCleanShutdown();
@@ -366,13 +345,18 @@ int runTest(const std::string& name) {
         std::fprintf(stderr, "Unknown test: %s\n", name.c_str());
         return 2;
     }
+    if (!expectsMessages && validationMessageCount() > 0) {
+        std::printf("%u validation messages\n", validationMessageCount());
+        passed = false;
+    }
     std::printf("%s: %s\n", name.c_str(), passed ? "PASS" : "FAIL");
     return passed ? 0 : 1;
 }
 
 int printUsage() {
-    std::fprintf(stderr, "Usage: gpu_profiler --info\n");
-    std::fprintf(stderr, "       gpu_profiler --test <name>\n");
+    std::fprintf(stderr,
+                 "Usage: gpu_profiler --info\n"
+                 "       gpu_profiler --test <name>\n");
     return 2;
 }
 
