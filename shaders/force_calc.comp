@@ -1,0 +1,41 @@
+#version 450
+
+layout(local_size_x = 64) in;
+
+struct Particle {
+    vec4 pos_mass;   // xyz = position, w = mass
+    vec4 vel_pad;    // xyz = velocity, w = unused
+};
+
+layout(std430, set = 0, binding = 0) readonly buffer Particles {
+    Particle particles[];
+};
+
+layout(std430, set = 0, binding = 1) writeonly buffer Accelerations {
+    vec4 accelerations[];
+};
+
+layout(push_constant) uniform PushConstants {
+    uint count;
+    float G;
+    float softening;
+    float dt;
+};
+
+void main() {
+    uint i = gl_GlobalInvocationID.x;
+    if (i >= count) return;
+
+    vec3 pos_i = particles[i].pos_mass.xyz;
+    vec3 acc = vec3(0.0);
+    float eps2 = softening * softening;
+
+    for (uint j = 0; j < count; ++j) {
+        vec3 r = particles[j].pos_mass.xyz - pos_i;
+        float dist2 = dot(r, r) + eps2;
+        float inv_dist3 = 1.0 / (dist2 * sqrt(dist2));
+        acc += G * particles[j].pos_mass.w * r * inv_dist3;
+    }
+
+    accelerations[i] = vec4(acc, 0.0);
+}
