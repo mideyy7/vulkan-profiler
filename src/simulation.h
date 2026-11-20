@@ -59,3 +59,51 @@ struct Vec3d {
 };
 
 std::vector<Vec3d> cpuForces(const std::vector<Particle>& particles);
+
+// ---------------------------------------------------------------------------
+// Simulation
+// ---------------------------------------------------------------------------
+
+class Simulation {
+public:
+    Simulation(VulkanContext& ctx, const std::vector<Particle>& particles);
+    ~Simulation();
+
+    Simulation(const Simulation&) = delete;
+    Simulation& operator=(const Simulation&) = delete;
+
+    // Run the force kernel only, then read back accelerations.
+    // Returns one {ax, ay, az, 0} per particle.
+    std::vector<std::array<float, 4>> computeAndReadForces();
+
+    uint32_t particleCount() const { return particleCount_; }
+
+private:
+    void create(const std::vector<Particle>& particles);
+    void destroy();
+    void beginCommands(VkCommandBufferUsageFlags flags);
+    void recordForceDispatch();
+    void recordStepBoundaryBarrier(VkPipelineStageFlags srcStages);
+    void submitAndWait();
+
+    VulkanContext& ctx_;
+    uint32_t particleCount_;
+    uint32_t groups_;
+
+    Buffer particleBuf_{};
+    Buffer accelBuf_{};
+    Buffer particleReadback_{};
+    Buffer accelReadback_{};
+
+    VkShaderModule forceModule_ = VK_NULL_HANDLE;
+    VkShaderModule integrateModule_ = VK_NULL_HANDLE;
+    VkDescriptorSetLayout descSetLayout_ = VK_NULL_HANDLE;
+    VkPipelineLayout pipelineLayout_ = VK_NULL_HANDLE;
+    VkPipeline forcePipeline_ = VK_NULL_HANDLE;
+    VkPipeline integratePipeline_ = VK_NULL_HANDLE;
+    VkDescriptorPool descPool_ = VK_NULL_HANDLE;
+    VkDescriptorSet descSet_ = VK_NULL_HANDLE;
+    VkCommandPool cmdPool_ = VK_NULL_HANDLE;
+    VkCommandBuffer cmd_ = VK_NULL_HANDLE;
+    VkFence fence_ = VK_NULL_HANDLE;
+};

@@ -3,7 +3,6 @@
 #include "buffers.h"
 #include "vk_context.h"
 
-#include <chrono>
 #include <cmath>
 #include <cstring>
 #include <fstream>
@@ -113,4 +112,295 @@ std::vector<Vec3d> cpuForces(const std::vector<Particle>& particles) {
     }
 
     return acc;
+}
+
+// ---------------------------------------------------------------------------
+// Simulation — construction and destruction
+// ---------------------------------------------------------------------------
+
+Simulation::Simulation(VulkanContext& ctx, const std::vector<Particle>& particles)
+    : ctx_(ctx),
+      particleCount_(static_cast<uint32_t>(particles.size())),
+      groups_((particleCount_ + kWorkgroupSize - 1) / kWorkgroupSize) {
+    try {
+        create(particles);
+    } catch (...) {
+        // A destructor does not run when its constructor throws.
+        destroy();
+        throw;
+    }
+}
+
+Simulation::~Simulation() {
+    destroy();
+}
+
+void Simulation::create(const std::vector<Particle>& particles) {
+    const VkDeviceSize particleSize = particleCount_ * sizeof(Particle);
+    const VkDeviceSize accelSize = particleCount_ * 4 * sizeof(float);
+
+    // --- Buffers ---
+    particleBuf_ = createBuffer(ctx_, particleSize,
+                                VK_BUFFER_USAGE_STORAGE_BUFFER_BIT |
+                                    VK_BUFFER_USAGE_TRANSFER_SRC_BIT |
+                                    VK_BUFFER_USAGE_TRANSFER_DST_BIT,
+                                VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
+    accelBuf_ = createBuffer(ctx_, accelSize,
+                             VK_BUFFER_USAGE_STORAGE_BUFFER_BIT |
+                                 VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
+                             VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
+    particleReadback_ = createBuffer(ctx_, particleSize,
+                                     VK_BUFFER_USAGE_TRANSFER_DST_BIT,
+                                     VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT |
+                                         VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
+    accelReadback_ = createBuffer(ctx_, accelSize,
+                                  VK_BUFFER_USAGE_TRANSFER_DST_BIT,
+                                  VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT |
+                                      VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
+
+    uploadToDeviceLocal(ctx_, particleBuf_, particles.data(), particleSize);
+
+    // --- Shader modules ---
+    forceModule_ =
+        createShaderModule(ctx_.device(), loadShader(shaderPath("force_calc.comp.spv")));
+    integrateModule_ =
+        createShaderModule(ctx_.device(), loadShader(shaderPath("integrate.comp.spv")));
+
+    // --- Descriptor set layout: 2 storage buffers ---
+    VkDescriptorSetLayoutBinding bindings[2]{};
+    for (int b = 0; b < 2; ++b) {
+        bindings[b].binding = static_cast<uint32_t>(b);
+        bindings[b].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+        bindings[b].descriptorCount = 1;
+        bindings[b].stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
+    }
+    VkDescriptorSetLayoutCreateInfo layoutInfo{};
+    layoutInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
+    layoutInfo.bindingCount = 2;
+    layoutInfo.pBindings = bindings;
+    check(vkCreateDescriptorSetLayout(ctx_.device(), &layoutInfo, nullptr, &descSetLayout_),
+          "vkCreateDescriptorSetLayout");
+
+    // --- Pipeline layout with push constants ---
+    VkPushConstantRange pushRange{};
+    pushRange.stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
+    pushRange.offset = 0;
+    pushRange.size = sizeof(PushConstants);
+
+    VkPipelineLayoutCreateInfo pipeLayoutInfo{};
+    pipeLayoutInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
+    pipeLayoutInfo.setLayoutCount = 1;
+    pipeLayoutInfo.pSetLayouts = &descSetLayout_;
+    pipeLayoutInfo.pushConstantRangeCount = 1;
+    pipeLayoutInfo.pPushConstantRanges = &pushRange;
+    check(vkCreatePipelineLayout(ctx_.device(), &pipeLayoutInfo, nullptr, &pipelineLayout_),
+          "vkCreatePipelineLayout");
+
+    // --- Compute pipelines ---
+    VkComputePipelineCreateInfo pipeInfo{};
+    pipeInfo.sType = VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO;
+    pipeInfo.stage.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
+    pipeInfo.stage.stage = VK_SHADER_STAGE_COMPUTE_BIT;
+    pipeInfo.stage.pName = "main";
+    pipeInfo.layout = pipelineLayout_;
+
+    pipeInfo.stage.module = forceModule_;
+    check(vkCreateComputePipelines(ctx_.device(), VK_NULL_HANDLE, 1, &pipeInfo, nullptr,
+                                   &forcePipeline_),
+          "vkCreateComputePipelines (force)");
+
+    pipeInfo.stage.module = integrateModule_;
+    check(vkCreateComputePipelines(ctx_.device(), VK_NULL_HANDLE, 1, &pipeInfo, nullptr,
+                                   &integratePipeline_),
+          "vkCreateComputePipelines (integrate)");
+
+    // --- Descriptor pool and set ---
+    VkDescriptorPoolSize poolSize{};
+    poolSize.type = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+    poolSize.descriptorCount = 2;
+
+    VkDescriptorPoolCreateInfo poolInfo{};
+    poolInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
+    poolInfo.maxSets = 1;
+    poolInfo.poolSizeCount = 1;
+    poolInfo.pPoolSizes = &poolSize;
+    check(vkCreateDescriptorPool(ctx_.device(), &poolInfo, nullptr, &descPool_),
+          "vkCreateDescriptorPool");
+
+    VkDescriptorSetAllocateInfo setAllocInfo{};
+    setAllocInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
+    setAllocInfo.descriptorPool = descPool_;
+    setAllocInfo.descriptorSetCount = 1;
+    setAllocInfo.pSetLayouts = &descSetLayout_;
+    check(vkAllocateDescriptorSets(ctx_.device(), &setAllocInfo, &descSet_),
+          "vkAllocateDescriptorSets");
+
+    VkDescriptorBufferInfo bufInfos[2]{};
+    bufInfos[0] = {particleBuf_.buffer, 0, particleSize};
+    bufInfos[1] = {accelBuf_.buffer, 0, accelSize};
+    VkWriteDescriptorSet writes[2]{};
+    for (int w = 0; w < 2; ++w) {
+        writes[w].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+        writes[w].dstSet = descSet_;
+        writes[w].dstBinding = static_cast<uint32_t>(w);
+        writes[w].descriptorCount = 1;
+        writes[w].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+        writes[w].pBufferInfo = &bufInfos[w];
+    }
+    vkUpdateDescriptorSets(ctx_.device(), 2, writes, 0, nullptr);
+
+    // --- Command pool, buffer, fence ---
+    VkCommandPoolCreateInfo cmdPoolInfo{};
+    cmdPoolInfo.sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO;
+    cmdPoolInfo.flags = VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT;
+    cmdPoolInfo.queueFamilyIndex = ctx_.queueFamilyIndex();
+    check(vkCreateCommandPool(ctx_.device(), &cmdPoolInfo, nullptr, &cmdPool_),
+          "vkCreateCommandPool");
+
+    VkCommandBufferAllocateInfo cmdAllocInfo{};
+    cmdAllocInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
+    cmdAllocInfo.commandPool = cmdPool_;
+    cmdAllocInfo.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
+    cmdAllocInfo.commandBufferCount = 1;
+    check(vkAllocateCommandBuffers(ctx_.device(), &cmdAllocInfo, &cmd_),
+          "vkAllocateCommandBuffers");
+
+    VkFenceCreateInfo fenceInfo{};
+    fenceInfo.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO;
+    check(vkCreateFence(ctx_.device(), &fenceInfo, nullptr, &fence_), "vkCreateFence");
+}
+
+void Simulation::destroy() {
+    const VkDevice device = ctx_.device();
+    if (fence_ != VK_NULL_HANDLE) vkDestroyFence(device, fence_, nullptr);
+    if (cmdPool_ != VK_NULL_HANDLE) vkDestroyCommandPool(device, cmdPool_, nullptr);
+    if (descPool_ != VK_NULL_HANDLE) vkDestroyDescriptorPool(device, descPool_, nullptr);
+    if (integratePipeline_ != VK_NULL_HANDLE)
+        vkDestroyPipeline(device, integratePipeline_, nullptr);
+    if (forcePipeline_ != VK_NULL_HANDLE) vkDestroyPipeline(device, forcePipeline_, nullptr);
+    if (pipelineLayout_ != VK_NULL_HANDLE)
+        vkDestroyPipelineLayout(device, pipelineLayout_, nullptr);
+    if (descSetLayout_ != VK_NULL_HANDLE)
+        vkDestroyDescriptorSetLayout(device, descSetLayout_, nullptr);
+    if (integrateModule_ != VK_NULL_HANDLE)
+        vkDestroyShaderModule(device, integrateModule_, nullptr);
+    if (forceModule_ != VK_NULL_HANDLE) vkDestroyShaderModule(device, forceModule_, nullptr);
+    fence_ = VK_NULL_HANDLE;
+    cmdPool_ = VK_NULL_HANDLE;
+    descPool_ = VK_NULL_HANDLE;
+    integratePipeline_ = VK_NULL_HANDLE;
+    forcePipeline_ = VK_NULL_HANDLE;
+    pipelineLayout_ = VK_NULL_HANDLE;
+    descSetLayout_ = VK_NULL_HANDLE;
+    integrateModule_ = VK_NULL_HANDLE;
+    forceModule_ = VK_NULL_HANDLE;
+    destroyBuffer(device, accelReadback_);
+    destroyBuffer(device, particleReadback_);
+    destroyBuffer(device, accelBuf_);
+    destroyBuffer(device, particleBuf_);
+}
+
+// ---------------------------------------------------------------------------
+// Simulation — recording helpers
+// ---------------------------------------------------------------------------
+
+void Simulation::beginCommands(VkCommandBufferUsageFlags flags) {
+    check(vkResetCommandBuffer(cmd_, 0), "vkResetCommandBuffer");
+    VkCommandBufferBeginInfo beginInfo{};
+    beginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
+    beginInfo.flags = flags;
+    check(vkBeginCommandBuffer(cmd_, &beginInfo), "vkBeginCommandBuffer");
+
+    // Push constants and the descriptor set stay bound across pipeline
+    // changes because both pipelines share one pipeline layout.
+    const PushConstants pc{particleCount_, kG, kSoftening, kDt};
+    vkCmdPushConstants(cmd_, pipelineLayout_, VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof(pc), &pc);
+    vkCmdBindDescriptorSets(cmd_, VK_PIPELINE_BIND_POINT_COMPUTE, pipelineLayout_, 0, 1,
+                            &descSet_, 0, nullptr);
+}
+
+void Simulation::recordForceDispatch() {
+    // Force dispatch: reads particles, writes accelerations.
+    vkCmdBindPipeline(cmd_, VK_PIPELINE_BIND_POINT_COMPUTE, forcePipeline_);
+    cmdDispatch(cmd_, groups_);
+}
+
+void Simulation::recordStepBoundaryBarrier(VkPipelineStageFlags srcStages) {
+    // Step-boundary barrier (C7): the next step reads and writes both buffers,
+    // so cover both with SHADER_WRITE → SHADER_READ | SHADER_WRITE.
+    VkBufferMemoryBarrier stepBarriers[2]{};
+    for (int b = 0; b < 2; ++b) {
+        stepBarriers[b].sType = VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER;
+        stepBarriers[b].srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
+        stepBarriers[b].dstAccessMask = VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT;
+        stepBarriers[b].srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+        stepBarriers[b].dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+        stepBarriers[b].offset = 0;
+        stepBarriers[b].size = VK_WHOLE_SIZE;
+    }
+    stepBarriers[0].buffer = particleBuf_.buffer;
+    stepBarriers[1].buffer = accelBuf_.buffer;
+    cmdPipelineBarrier(cmd_, srcStages, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, 0, nullptr, 2,
+                       stepBarriers);
+}
+
+void Simulation::submitAndWait() {
+    VkSubmitInfo submitInfo{};
+    submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
+    submitInfo.commandBufferCount = 1;
+    submitInfo.pCommandBuffers = &cmd_;
+
+    check(vkResetFences(ctx_.device(), 1, &fence_), "vkResetFences");
+    check(vkQueueSubmit(ctx_.queue(), 1, &submitInfo, fence_), "vkQueueSubmit");
+    waitForFence(ctx_.device(), fence_);
+}
+
+// ---------------------------------------------------------------------------
+// Simulation — public methods
+// ---------------------------------------------------------------------------
+
+std::vector<std::array<float, 4>> Simulation::computeAndReadForces() {
+    const VkDeviceSize accelSize = particleCount_ * 4 * sizeof(float);
+
+    beginCommands(VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT);
+    recordForceDispatch();
+
+    // Barrier: COMPUTE SHADER_WRITE → TRANSFER TRANSFER_READ on accel buffer.
+    VkBufferMemoryBarrier barrier{};
+    barrier.sType = VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER;
+    barrier.srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
+    barrier.dstAccessMask = VK_ACCESS_TRANSFER_READ_BIT;
+    barrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+    barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+    barrier.buffer = accelBuf_.buffer;
+    barrier.offset = 0;
+    barrier.size = accelSize;
+    cmdPipelineBarrier(cmd_, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+                       VK_PIPELINE_STAGE_TRANSFER_BIT, 0, nullptr, 1, &barrier);
+
+    cmdCopyBuffer(cmd_, accelBuf_.buffer, accelReadback_.buffer, accelSize);
+
+    // Barrier: TRANSFER → HOST (C6).
+    VkBufferMemoryBarrier hostBarrier{};
+    hostBarrier.sType = VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER;
+    hostBarrier.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+    hostBarrier.dstAccessMask = VK_ACCESS_HOST_READ_BIT;
+    hostBarrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+    hostBarrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+    hostBarrier.buffer = accelReadback_.buffer;
+    hostBarrier.offset = 0;
+    hostBarrier.size = accelSize;
+    cmdPipelineBarrier(cmd_, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_HOST_BIT, 0,
+                       nullptr, 1, &hostBarrier);
+
+    // Later work must wait for this copy before overwriting the accelerations.
+    recordStepBoundaryBarrier(VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT |
+                              VK_PIPELINE_STAGE_TRANSFER_BIT);
+
+    check(vkEndCommandBuffer(cmd_), "vkEndCommandBuffer");
+    submitAndWait();
+
+    std::vector<std::array<float, 4>> result(particleCount_);
+    std::memcpy(result.data(), accelReadback_.mapped, static_cast<size_t>(accelSize));
+    return result;
 }
