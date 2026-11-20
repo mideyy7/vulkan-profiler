@@ -4,6 +4,9 @@
 
 #include <cstdint>
 
+// Throws std::runtime_error naming `action` if `result` is not VK_SUCCESS.
+void check(VkResult result, const char* action);
+
 // Number of validation warnings and errors reported since the program started.
 // It lives outside VulkanContext so it can still be read after the context is
 // destroyed, which is when leaked objects are reported.

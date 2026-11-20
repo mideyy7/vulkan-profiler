@@ -6,17 +6,6 @@
 #include <stdexcept>
 #include <string>
 
-namespace {
-
-void check(VkResult result, const char* action) {
-    if (result != VK_SUCCESS) {
-        throw std::runtime_error(std::string(action) + " failed with VkResult " +
-                                 std::to_string(result));
-    }
-}
-
-}  // namespace
-
 uint32_t findMemoryType(VkPhysicalDevice physicalDevice, uint32_t typeFilter,
                         VkMemoryPropertyFlags properties) {
     VkPhysicalDeviceMemoryProperties memProperties{};

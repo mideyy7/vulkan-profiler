@@ -17,13 +17,6 @@ constexpr const char* kPortabilitySubsetExtension = "VK_KHR_portability_subset";
 
 std::atomic<uint32_t> gValidationMessages{0};
 
-void check(VkResult result, const char* action) {
-    if (result != VK_SUCCESS) {
-        throw std::runtime_error(std::string(action) + " failed with VkResult " +
-                                 std::to_string(result));
-    }
-}
-
 std::vector<VkExtensionProperties> instanceExtensions(const char* layerName) {
     uint32_t count = 0;
     check(vkEnumerateInstanceExtensionProperties(layerName, &count, nullptr),
@@ -135,6 +128,13 @@ const char* deviceTypeName(VkPhysicalDeviceType type) {
 }
 
 }  // namespace
+
+void check(VkResult result, const char* action) {
+    if (result != VK_SUCCESS) {
+        throw std::runtime_error(std::string(action) + " failed with VkResult " +
+                                 std::to_string(result));
+    }
+}
 
 uint32_t validationMessageCount() {
     return gValidationMessages.load();

@@ -15,13 +15,6 @@ namespace {
 // Helpers
 // ---------------------------------------------------------------------------
 
-void check(VkResult result, const char* action) {
-    if (result != VK_SUCCESS) {
-        throw std::runtime_error(std::string(action) + " failed with VkResult " +
-                                 std::to_string(result));
-    }
-}
-
 std::vector<uint32_t> loadShader(const std::string& path) {
     std::ifstream file(path, std::ios::ate | std::ios::binary);
     if (!file.is_open()) {
