@@ -76,6 +76,7 @@ Then **destroy** the instance on Vast.ai. Stopping it isn't enough, because a st
 | Step 3 stops: Vulkan sees only `llvmpipe`, or no device | Container started without graphics capability | Recreate the instance with Docker option `-e NVIDIA_DRIVER_CAPABILITIES=all` |
 | Step 3 stops, and `ldconfig -p \| grep libGLX_nvidia` finds nothing | The driver's Vulkan library isn't mounted | Same fix as above; inside a container, `apt install libnvidia-gl-*` won't work |
 | Step 3 stops, and `VK_LOADER_DEBUG=driver vulkaninfo --summary` shows `libXext.so.6: cannot open shared object file` | Minimal image lacks X11 libraries that NVIDIA's Vulkan driver links | `apt-get install -y libx11-6 libxext6` (the script now does this) |
+| Step 3 stops, and the loader debug output says `Could not get 'vkCreateInstance' via 'vk_icdGetInstanceProcAddr' for ICD libGLX_nvidia.so.0` | Minimal image lacks the GL dispatch libraries (libglvnd) | `apt-get install -y libglvnd0 libgl1 libglx0 libegl1` (the script now does this) |
 | `vkCreateInstance failed with VkResult -6` | Validation layer not found | `apt-get install -y vulkan-validationlayers`, then rerun |
 | `glslc: not found` during the build | Package missing | `apt-get install -y glslc`, then rerun |
 | Only `layer_check` fails | Older Vulkan loader without `VK_ADD_LAYER_PATH` / `VK_LOADER_LAYERS_ENABLE` | Benchmarks are still valid. Record the output and report it |

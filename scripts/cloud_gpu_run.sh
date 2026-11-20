@@ -28,7 +28,9 @@ step "2. Build tools and Vulkan packages"
 $SUDO apt-get update -qq
 $SUDO env DEBIAN_FRONTEND=noninteractive apt-get install -y -qq \
     cmake g++ python3 git libvulkan-dev vulkan-tools vulkan-validationlayers glslc \
-    libx11-6 libxext6  # NVIDIA's Vulkan driver links these; minimal CUDA images lack them
+    libx11-6 libxext6 libglvnd0 libgl1 libglx0 libegl1
+# The last six are needed by NVIDIA's Vulkan driver but missing from minimal
+# CUDA images: without them Vulkan silently falls back to the llvmpipe CPU renderer.
 
 # In containers the NVIDIA Vulkan library can be present without the small
 # JSON file that tells the Vulkan loader where it is. Add it if missing.
