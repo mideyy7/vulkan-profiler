@@ -172,10 +172,12 @@ void cmdCopyBuffer(VkCommandBuffer cmd, VkBuffer src, VkBuffer dst, VkDeviceSize
     vkCmdCopyBuffer(cmd, src, dst, 1, &region);
 }
 
-VulkanContext::VulkanContext() {
+VulkanContext::VulkanContext(bool enableValidation) : validationEnabled_(enableValidation) {
     try {
         createInstance();
-        createDebugMessenger();
+        if (validationEnabled_) {
+            createDebugMessenger();
+        }
         pickPhysicalDevice();
         createDevice();
     } catch (...) {
@@ -190,23 +192,28 @@ VulkanContext::~VulkanContext() {
 }
 
 void VulkanContext::createInstance() {
-    if (!hasValidationLayer()) {
-        throw std::runtime_error(std::string(kValidationLayer) + " is not installed");
-    }
-
-    // Without this setting, synchronization validation ignores shader accesses.
-    // The final 0 keeps any value already set in the environment.
-    setenv("VK_LAYER_SYNCVAL_SHADER_ACCESSES_HEURISTIC", "true", 0);
-
     const std::vector<VkExtensionProperties> available = instanceExtensions(nullptr);
-    const std::vector<VkExtensionProperties> fromLayer = instanceExtensions(kValidationLayer);
-    if (!hasExtension(fromLayer, VK_EXT_DEBUG_UTILS_EXTENSION_NAME) ||
-        !hasExtension(fromLayer, kValidationFeaturesExtension)) {
-        throw std::runtime_error("the validation layer lacks a required extension");
-    }
+    std::vector<const char*> extensions;
+    std::vector<const char*> layers;
 
-    std::vector<const char*> extensions = {VK_EXT_DEBUG_UTILS_EXTENSION_NAME,
-                                           kValidationFeaturesExtension};
+    if (validationEnabled_) {
+        if (!hasValidationLayer()) {
+            throw std::runtime_error(std::string(kValidationLayer) + " is not installed");
+        }
+
+        // Without this setting, synchronization validation ignores shader accesses.
+        // The final 0 keeps any value already set in the environment.
+        setenv("VK_LAYER_SYNCVAL_SHADER_ACCESSES_HEURISTIC", "true", 0);
+
+        const std::vector<VkExtensionProperties> fromLayer = instanceExtensions(kValidationLayer);
+        if (!hasExtension(fromLayer, VK_EXT_DEBUG_UTILS_EXTENSION_NAME) ||
+            !hasExtension(fromLayer, kValidationFeaturesExtension)) {
+            throw std::runtime_error("the validation layer lacks a required extension");
+        }
+        extensions.push_back(VK_EXT_DEBUG_UTILS_EXTENSION_NAME);
+        extensions.push_back(kValidationFeaturesExtension);
+        layers.push_back(kValidationLayer);
+    }
 
     VkInstanceCreateFlags flags = 0;
     if (hasExtension(available, VK_KHR_PORTABILITY_ENUMERATION_EXTENSION_NAME)) {
@@ -230,15 +237,13 @@ void VulkanContext::createInstance() {
     VkDebugUtilsMessengerCreateInfoEXT messengerInfo = messengerCreateInfo();
     messengerInfo.pNext = &validationFeatures;
 
-    const char* layers[] = {kValidationLayer};
-
     VkInstanceCreateInfo createInfo{};
     createInfo.sType = VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO;
-    createInfo.pNext = &messengerInfo;
+    createInfo.pNext = validationEnabled_ ? &messengerInfo : nullptr;
     createInfo.flags = flags;
     createInfo.pApplicationInfo = &application;
-    createInfo.enabledLayerCount = 1;
-    createInfo.ppEnabledLayerNames = layers;
+    createInfo.enabledLayerCount = static_cast<uint32_t>(layers.size());
+    createInfo.ppEnabledLayerNames = layers.data();
     createInfo.enabledExtensionCount = static_cast<uint32_t>(extensions.size());
     createInfo.ppEnabledExtensionNames = extensions.data();
 
@@ -329,6 +334,28 @@ void VulkanContext::destroy() {
         vkDestroyInstance(instance_, nullptr);
         instance_ = VK_NULL_HANDLE;
     }
+}
+
+float VulkanContext::timestampPeriod() const {
+    VkPhysicalDeviceProperties properties{};
+    vkGetPhysicalDeviceProperties(physicalDevice_, &properties);
+    return properties.limits.timestampPeriod;
+}
+
+std::string VulkanContext::deviceName() const {
+    VkPhysicalDeviceProperties properties{};
+    vkGetPhysicalDeviceProperties(physicalDevice_, &properties);
+    return properties.deviceName;
+}
+
+std::string VulkanContext::driverDescription() const {
+    VkPhysicalDeviceDriverProperties driver{};
+    driver.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DRIVER_PROPERTIES;
+    VkPhysicalDeviceProperties2 properties2{};
+    properties2.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2;
+    properties2.pNext = &driver;
+    vkGetPhysicalDeviceProperties2(physicalDevice_, &properties2);
+    return std::string(driver.driverName) + " " + driver.driverInfo;
 }
 
 void VulkanContext::printDeviceInfo() const {

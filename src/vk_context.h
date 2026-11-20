@@ -3,6 +3,7 @@
 #include <vulkan/vulkan.h>
 
 #include <cstdint>
+#include <string>
 
 // Throws std::runtime_error naming `action` if `result` is not VK_SUCCESS.
 void check(VkResult result, const char* action);
@@ -28,7 +29,9 @@ void cmdCopyBuffer(VkCommandBuffer cmd, VkBuffer src, VkBuffer dst, VkDeviceSize
 
 class VulkanContext {
 public:
-    VulkanContext();
+    // Validation is on by default. Benchmarks turn it off because the layer's
+    // checks add CPU time to every call being measured.
+    explicit VulkanContext(bool enableValidation = true);
     ~VulkanContext();
 
     VulkanContext(const VulkanContext&) = delete;
@@ -38,6 +41,12 @@ public:
     VkDevice device() const { return device_; }
     VkQueue queue() const { return queue_; }
     uint32_t queueFamilyIndex() const { return queueFamilyIndex_; }
+    uint32_t timestampValidBits() const { return timestampValidBits_; }
+    bool validationEnabled() const { return validationEnabled_; }
+
+    float timestampPeriod() const;
+    std::string deviceName() const;
+    std::string driverDescription() const;
 
     void printDeviceInfo() const;
 
@@ -48,6 +57,7 @@ private:
     void createDevice();
     void destroy();
 
+    bool validationEnabled_ = true;
     VkInstance instance_ = VK_NULL_HANDLE;
     VkDebugUtilsMessengerEXT debugMessenger_ = VK_NULL_HANDLE;
     VkPhysicalDevice physicalDevice_ = VK_NULL_HANDLE;
