@@ -1,0 +1,13 @@
+Device name:                  Apple M1
+Device type:                  integrated GPU
+Vulkan API version:           1.2.357
+Driver:                       MoltenVK 1.4.2
+Driver version (raw):         10402
+Compute queue family:         0
+timestampPeriod:              1.000000 ns/tick
+timestampComputeAndGraphics:  true
+timestampValidBits:           64
+Max workgroup size:           1024 x 1024 x 1024
+Max workgroup invocations:    1024
+Max shared memory:            32768 bytes
+Validation messages:          0
