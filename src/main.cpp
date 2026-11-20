@@ -368,6 +368,54 @@ bool testForce() {
     return passed;
 }
 
+// Total momentum before and after 100 steps (C5).
+bool testMomentum() {
+    const uint32_t sizes[] = {8, 64, 256};
+    constexpr uint32_t kSteps = 100;
+    constexpr double kLimit = 1e-5;
+    VulkanContext ctx;
+    bool passed = true;
+
+    auto momentum = [](const std::vector<Particle>& ps) {
+        Vec3d p{0.0, 0.0, 0.0};
+        for (const Particle& q : ps) {
+            p.x += static_cast<double>(q.mass) * q.vx;
+            p.y += static_cast<double>(q.mass) * q.vy;
+            p.z += static_cast<double>(q.mass) * q.vz;
+        }
+        return p;
+    };
+
+    for (uint32_t n : sizes) {
+        double worst = 0.0;
+        for (uint32_t seed = 1; seed <= kTestSeeds; ++seed) {
+            const std::vector<Particle> initial = generateParticles(n, seed);
+            double scale = 0.0;  // Sum of m|v|, never close to zero (C5).
+            for (const Particle& q : initial) {
+                scale += static_cast<double>(q.mass) *
+                         std::sqrt(static_cast<double>(q.vx) * q.vx +
+                                   static_cast<double>(q.vy) * q.vy +
+                                   static_cast<double>(q.vz) * q.vz);
+            }
+            Simulation sim(ctx, initial);
+            for (uint32_t s = 0; s < kSteps; ++s) {
+                sim.runBatch(1);
+            }
+            const Vec3d before = momentum(initial);
+            const Vec3d after = momentum(sim.readParticles());
+            const double dx = after.x - before.x;
+            const double dy = after.y - before.y;
+            const double dz = after.z - before.z;
+            worst = std::max(worst, std::sqrt(dx * dx + dy * dy + dz * dz) / scale);
+        }
+        const bool ok = worst < kLimit;
+        std::printf("  N=%-4u relative momentum drift %.3e after %u steps: %s\n", n, worst,
+                    kSteps, ok ? "PASS" : "FAIL");
+        passed = passed && ok;
+    }
+    return passed;
+}
+
 // ---------------------------------------------------------------------------
 // Test dispatch
 // ---------------------------------------------------------------------------
@@ -389,6 +437,8 @@ int runTest(const std::string& name) {
         passed = testVectorAdd();
     } else if (name == "force_naive") {
         passed = testForce();
+    } else if (name == "momentum") {
+        passed = testMomentum();
     } else {
         std::fprintf(stderr, "Unknown test: %s\n", name.c_str());
         return 2;
