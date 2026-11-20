@@ -31,7 +31,7 @@ $SUDO env DEBIAN_FRONTEND=noninteractive apt-get install -y -qq \
 
 # In containers the NVIDIA Vulkan library can be present without the small
 # JSON file that tells the Vulkan loader where it is. Add it if missing.
-if ! ls /usr/share/vulkan/icd.d/nvidia_icd.json /etc/vulkan/icd.d/nvidia_icd.json >/dev/null 2>&1 \
+if [ ! -e /usr/share/vulkan/icd.d/nvidia_icd.json ] && [ ! -e /etc/vulkan/icd.d/nvidia_icd.json ] \
     && ldconfig -p | grep -q 'libGLX_nvidia.so.0'; then
     echo "Adding the missing NVIDIA Vulkan driver manifest"
     $SUDO mkdir -p /etc/vulkan/icd.d
