@@ -30,7 +30,8 @@ foreach(SHADER_SOURCE IN LISTS SHADER_SOURCES)
 endforeach()
 add_custom_target(shaders ALL DEPENDS ${SHADER_BINARIES})
 
-add_executable(gpu_profiler src/main.cpp src/vk_context.cpp src/buffers.cpp src/simulation.cpp)
+add_executable(gpu_profiler src/main.cpp src/vk_context.cpp src/buffers.cpp src/simulation.cpp
+                            src/report.cpp)
 add_dependencies(gpu_profiler shaders)
 target_compile_options(gpu_profiler PRIVATE -Wall -Wextra -Wpedantic)
 target_link_libraries(gpu_profiler PRIVATE Vulkan::Vulkan)
