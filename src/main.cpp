@@ -514,7 +514,7 @@ bool testBatchEquivalence() {
 }
 
 // ---------------------------------------------------------------------------
-// --report
+// --report and --sweep
 // ---------------------------------------------------------------------------
 
 struct Options {
@@ -523,6 +523,7 @@ struct Options {
     uint32_t steps = 200;
     uint32_t warmup = 20;
     uint32_t seed = 1;
+    uint32_t maxParticles = 32768;
     std::string csv;
     bool validation = true;
 };
@@ -578,6 +579,54 @@ int runReport(const Options& o) {
     return finishRun(o.validation);
 }
 
+int runSweep(const Options& o) {
+    {
+        VulkanContext ctx(o.validation);
+        std::ofstream csv;
+        bool wroteHeader = false;
+        if (!o.csv.empty()) {
+            csv.open(o.csv);
+            if (!csv) {
+                throw std::runtime_error("cannot write " + o.csv);
+            }
+        }
+        std::printf("%8s %6s %7s %12s %12s %12s %12s\n", "N", "batch", "kernel",
+                    "frame_us", "frame_p99", "gpu_us", "overhead_us");
+        for (uint32_t n = 256; n <= o.maxParticles; n *= 2) {
+            RunInfo info;
+            const std::vector<StageRow> rows = measure(ctx, o, n, info);
+            const Stats frame = findRow(rows, "frame").stats;
+            const Stats gpu = findRow(rows, "gpu span").stats;
+            const Stats overhead = findRow(rows, "overhead (frame - gpu)").stats;
+            std::printf("%8u %6u %7s %12.2f %12.2f %12.2f %12.2f\n", n, o.batch,
+                        info.kernel.c_str(), frame.mean / 1e3, frame.p99 / 1e3, gpu.mean / 1e3,
+                        overhead.mean / 1e3);
+            std::fflush(stdout);
+            if (csv.is_open()) {
+                if (!wroteHeader) {
+                    info.particles = 0;  // Varies per row.
+                    csv << csvMetadata(info);
+                    csv << "n,batch,kernel,measured_steps,frame_mean_ns,frame_p99_ns,"
+                           "gpu_mean_ns,overhead_mean_ns,force_mean_ns,integrate_mean_ns,"
+                           "submit_mean_ns,wait_mean_ns\n";
+                    wroteHeader = true;
+                }
+                csv << n << ',' << o.batch << ',' << "naive" << ','
+                    << info.measuredSteps << ',' << frame.mean << ',' << frame.p99 << ','
+                    << gpu.mean << ',' << overhead.mean << ','
+                    << findRow(rows, "force").stats.mean << ','
+                    << findRow(rows, "integrate").stats.mean << ','
+                    << findRow(rows, "cpu submit").stats.mean << ','
+                    << findRow(rows, "cpu fence wait").stats.mean << '\n';
+            }
+        }
+        if (csv.is_open()) {
+            std::printf("Wrote %s\n", o.csv.c_str());
+        }
+    }
+    return finishRun(o.validation);
+}
+
 uint32_t parseCount(const std::string& flag, const char* value) {
     const unsigned long parsed = std::stoul(value);
     if (parsed == 0 || parsed > 1000000) {
@@ -608,6 +657,8 @@ Options parseOptions(int argc, char** argv, int first) {
             o.warmup = parseCount(flag, value);
         } else if (flag == "--seed") {
             o.seed = parseCount(flag, value);
+        } else if (flag == "--max-n") {
+            o.maxParticles = parseCount(flag, value);
         } else if (flag == "--csv") {
             o.csv = value;
         } else {
@@ -665,8 +716,9 @@ int printUsage() {
                  "Usage: gpu_profiler --info\n"
                  "       gpu_profiler --test <name>\n"
                  "       gpu_profiler --report [options]\n"
+                 "       gpu_profiler --sweep [options]\n"
                  "Options: --n N  --batch K  --steps S  --warmup W\n"
-                 "         --seed S  --csv PATH  --no-validation\n");
+                 "         --seed S  --max-n N  --csv PATH  --no-validation\n");
     return 2;
 }
 
@@ -683,6 +735,9 @@ int main(int argc, char** argv) {
         }
         if (mode == "--report") {
             return runReport(parseOptions(argc, argv, 2));
+        }
+        if (mode == "--sweep") {
+            return runSweep(parseOptions(argc, argv, 2));
         }
         return printUsage();
     } catch (const std::exception& error) {
