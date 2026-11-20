@@ -18,10 +18,26 @@ fi
 nvidia-smi --query-gpu=name,driver_version --format=csv,noheader
 driver_major=$(nvidia-smi --query-gpu=driver_version --format=csv,noheader | head -1 | cut -d. -f1)
 
+# Containers (e.g. Vast.ai) usually run as root without sudo installed.
+SUDO=""
+if [ "$(id -u)" -ne 0 ]; then
+    SUDO="sudo"
+fi
+
 step "2. Build tools and Vulkan packages"
-sudo apt-get update -qq
-sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq \
-    cmake g++ python3 libvulkan-dev vulkan-tools vulkan-validationlayers glslc
+$SUDO apt-get update -qq
+$SUDO env DEBIAN_FRONTEND=noninteractive apt-get install -y -qq \
+    cmake g++ python3 git libvulkan-dev vulkan-tools vulkan-validationlayers glslc
+
+# In containers the NVIDIA Vulkan library can be present without the small
+# JSON file that tells the Vulkan loader where it is. Add it if missing.
+if ! ls /usr/share/vulkan/icd.d/nvidia_icd.json /etc/vulkan/icd.d/nvidia_icd.json >/dev/null 2>&1 \
+    && ldconfig -p | grep -q 'libGLX_nvidia.so.0'; then
+    echo "Adding the missing NVIDIA Vulkan driver manifest"
+    $SUDO mkdir -p /etc/vulkan/icd.d
+    printf '{"file_format_version": "1.0.0", "ICD": {"library_path": "libGLX_nvidia.so.0", "api_version": "1.3"}}\n' \
+        | $SUDO tee /etc/vulkan/icd.d/nvidia_icd.json >/dev/null
+fi
 
 step "3. Vulkan must see the NVIDIA GPU"
 if ! vulkaninfo --summary 2>/dev/null | grep -qiE 'driverName *= *NVIDIA'; then
@@ -30,9 +46,9 @@ if ! vulkaninfo --summary 2>/dev/null | grep -qiE 'driverName *= *NVIDIA'; then
     echo
     echo "Likely fixes:"
     echo " - The driver was installed without its graphics/Vulkan part. Try:"
-    echo "     sudo apt-get install -y libnvidia-gl-${driver_major}"
-    echo " - Inside a container, start it with NVIDIA_DRIVER_CAPABILITIES=all"
-    echo "   (the default 'compute,utility' hides Vulkan)."
+    echo "     $SUDO apt-get install -y libnvidia-gl-${driver_major}"
+    echo " - Inside a container (e.g. Vast.ai), recreate it with the environment"
+    echo "   variable NVIDIA_DRIVER_CAPABILITIES=all; the default hides Vulkan."
     exit 1
 fi
 vulkaninfo --summary 2>/dev/null | grep -E 'deviceName|driverName|driverInfo'
