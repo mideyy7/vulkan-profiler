@@ -325,6 +325,28 @@ void Simulation::recordForceDispatch() {
     cmdDispatch(cmd_, groups_);
 }
 
+void Simulation::recordForceBarrier() {
+    // Barrier: accel buffer SHADER_WRITE → SHADER_READ so integrate sees
+    // the forces that were just computed.
+    VkBufferMemoryBarrier forceToIntegrate{};
+    forceToIntegrate.sType = VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER;
+    forceToIntegrate.srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
+    forceToIntegrate.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
+    forceToIntegrate.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+    forceToIntegrate.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+    forceToIntegrate.buffer = accelBuf_.buffer;
+    forceToIntegrate.offset = 0;
+    forceToIntegrate.size = VK_WHOLE_SIZE;
+    cmdPipelineBarrier(cmd_, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+                       VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, 0, nullptr, 1, &forceToIntegrate);
+}
+
+void Simulation::recordIntegrateDispatch() {
+    // Integrate dispatch: reads accel, reads and writes particles.
+    vkCmdBindPipeline(cmd_, VK_PIPELINE_BIND_POINT_COMPUTE, integratePipeline_);
+    cmdDispatch(cmd_, groups_);
+}
+
 void Simulation::recordStepBoundaryBarrier(VkPipelineStageFlags srcStages) {
     // Step-boundary barrier (C7): the next step reads and writes both buffers,
     // so cover both with SHADER_WRITE → SHADER_READ | SHADER_WRITE.
@@ -342,6 +364,55 @@ void Simulation::recordStepBoundaryBarrier(VkPipelineStageFlags srcStages) {
     stepBarriers[1].buffer = accelBuf_.buffer;
     cmdPipelineBarrier(cmd_, srcStages, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, 0, nullptr, 2,
                        stepBarriers);
+}
+
+void Simulation::recordBatch(uint32_t steps) {
+    // No ONE_TIME_SUBMIT flag: this command buffer is submitted many times.
+    beginCommands(0);
+
+    for (uint32_t k = 0; k < steps; ++k) {
+        recordForceDispatch();
+        recordForceBarrier();
+        recordIntegrateDispatch();
+        if (k + 1 < steps) {
+            recordStepBoundaryBarrier(VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT);
+        }
+    }
+
+    // Readback: particles SHADER_WRITE → TRANSFER_READ, copy, then TRANSFER → HOST (C6).
+    VkBufferMemoryBarrier toTransfer{};
+    toTransfer.sType = VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER;
+    toTransfer.srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
+    toTransfer.dstAccessMask = VK_ACCESS_TRANSFER_READ_BIT;
+    toTransfer.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+    toTransfer.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+    toTransfer.buffer = particleBuf_.buffer;
+    toTransfer.offset = 0;
+    toTransfer.size = VK_WHOLE_SIZE;
+    cmdPipelineBarrier(cmd_, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+                       VK_PIPELINE_STAGE_TRANSFER_BIT, 0, nullptr, 1, &toTransfer);
+
+    cmdCopyBuffer(cmd_, particleBuf_.buffer, particleReadback_.buffer, particleBuf_.size);
+
+    VkBufferMemoryBarrier toHost{};
+    toHost.sType = VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER;
+    toHost.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+    toHost.dstAccessMask = VK_ACCESS_HOST_READ_BIT;
+    toHost.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+    toHost.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+    toHost.buffer = particleReadback_.buffer;
+    toHost.offset = 0;
+    toHost.size = VK_WHOLE_SIZE;
+    cmdPipelineBarrier(cmd_, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_HOST_BIT, 0,
+                       nullptr, 1, &toHost);
+
+    // The next submission's first step must wait for this one's integrate
+    // writes and readback copy (C7).
+    recordStepBoundaryBarrier(VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT |
+                              VK_PIPELINE_STAGE_TRANSFER_BIT);
+
+    check(vkEndCommandBuffer(cmd_), "vkEndCommandBuffer");
+    recordedSteps_ = steps;
 }
 
 void Simulation::submitAndWait() {
@@ -398,9 +469,27 @@ std::vector<std::array<float, 4>> Simulation::computeAndReadForces() {
                               VK_PIPELINE_STAGE_TRANSFER_BIT);
 
     check(vkEndCommandBuffer(cmd_), "vkEndCommandBuffer");
+    recordedSteps_ = 0;
     submitAndWait();
 
     std::vector<std::array<float, 4>> result(particleCount_);
     std::memcpy(result.data(), accelReadback_.mapped, static_cast<size_t>(accelSize));
+    return result;
+}
+
+void Simulation::runBatch(uint32_t steps) {
+    if (steps == 0) {
+        throw std::runtime_error("runBatch needs at least one step");
+    }
+    if (recordedSteps_ != steps) {
+        recordBatch(steps);
+    }
+    submitAndWait();
+}
+
+std::vector<Particle> Simulation::readParticles() const {
+    std::vector<Particle> result(particleCount_);
+    std::memcpy(result.data(), particleReadback_.mapped,
+                static_cast<size_t>(particleCount_ * sizeof(Particle)));
     return result;
 }

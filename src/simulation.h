@@ -76,6 +76,13 @@ public:
     // Returns one {ax, ay, az, 0} per particle.
     std::vector<std::array<float, 4>> computeAndReadForces();
 
+    // Run `steps` full steps in one command buffer, one submit and one fence
+    // wait, then copy the particles back. steps = 1 is the unbatched case.
+    void runBatch(uint32_t steps);
+
+    // Particle state copied back by the most recent runBatch.
+    std::vector<Particle> readParticles() const;
+
     uint32_t particleCount() const { return particleCount_; }
 
 private:
@@ -83,7 +90,10 @@ private:
     void destroy();
     void beginCommands(VkCommandBufferUsageFlags flags);
     void recordForceDispatch();
+    void recordForceBarrier();
+    void recordIntegrateDispatch();
     void recordStepBoundaryBarrier(VkPipelineStageFlags srcStages);
+    void recordBatch(uint32_t steps);
     void submitAndWait();
 
     VulkanContext& ctx_;
@@ -106,4 +116,8 @@ private:
     VkCommandPool cmdPool_ = VK_NULL_HANDLE;
     VkCommandBuffer cmd_ = VK_NULL_HANDLE;
     VkFence fence_ = VK_NULL_HANDLE;
+
+    // Steps recorded in cmd_ by recordBatch, or 0 if cmd_ holds something else.
+    // A batch is recorded once and then resubmitted.
+    uint32_t recordedSteps_ = 0;
 };
