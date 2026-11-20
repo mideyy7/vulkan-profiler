@@ -1,4 +1,5 @@
 #include "buffers.h"
+#include "report.h"
 #include "simulation.h"
 #include "vk_context.h"
 
@@ -429,6 +430,55 @@ bool testValidationCanary() {
     return hazards > 0;
 }
 
+// Timestamps must be in order, each stage short, and the GPU span inside the frame.
+bool testTimestamps() {
+    VulkanContext ctx;
+    bool passed = true;
+    for (uint32_t steps : {1u, 8u}) {
+        Simulation sim(ctx, generateParticles(1024, 1));
+        for (int run = 0; run < 5; ++run) {
+            const BatchSample b = sim.runBatch(steps);
+            for (size_t q = 0; q + 1 < b.ticks.size(); ++q) {
+                if (b.ticks[q + 1] < b.ticks[q]) {
+                    std::printf("  batch %u: timestamp %zu goes backwards\n", steps, q + 1);
+                    passed = false;
+                }
+                const double stageNs =
+                    static_cast<double>(b.ticks[q + 1] - b.ticks[q]) * b.nsPerTick;
+                if (stageNs > 1e9) {
+                    std::printf("  batch %u: stage %zu took %.0f ns\n", steps, q, stageNs);
+                    passed = false;
+                }
+            }
+            const double gpuNs =
+                static_cast<double>(b.ticks.back() - b.ticks.front()) * b.nsPerTick;
+            if (gpuNs > b.frameNs) {
+                std::printf("  batch %u: GPU span %.0f ns exceeds frame %.0f ns\n", steps, gpuNs,
+                            b.frameNs);
+                passed = false;
+            }
+        }
+        std::printf("  batch %u: checked 5 submissions\n", steps);
+    }
+    return passed;
+}
+
+// Statistics against hand-computed values.
+bool testStats() {
+    std::vector<double> hundred;
+    for (int v = 100; v >= 1; --v) {
+        hundred.push_back(v);
+    }
+    const Stats a = computeStats(hundred);
+    const Stats b = computeStats({3.0, 1.0, 2.0});
+    const bool passed = a.mean == 50.5 && a.min == 1 && a.p50 == 50 && a.p99 == 99 &&
+                        a.max == 100 && b.mean == 2 && b.p50 == 2 && b.p99 == 3;
+    std::printf("  1..100: mean %.1f min %.0f p50 %.0f p99 %.0f max %.0f\n", a.mean, a.min,
+                a.p50, a.p99, a.max);
+    std::printf("  {3,1,2}: mean %.1f p50 %.0f p99 %.0f\n", b.mean, b.p50, b.p99);
+    return passed;
+}
+
 // ---------------------------------------------------------------------------
 // Test dispatch
 // ---------------------------------------------------------------------------
@@ -454,6 +504,10 @@ int runTest(const std::string& name) {
         passed = testMomentum();
     } else if (name == "validation_canary") {
         passed = testValidationCanary();
+    } else if (name == "timestamps") {
+        passed = testTimestamps();
+    } else if (name == "stats") {
+        passed = testStats();
     } else {
         std::fprintf(stderr, "Unknown test: %s\n", name.c_str());
         return 2;
